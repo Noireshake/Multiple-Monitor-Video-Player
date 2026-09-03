@@ -3,6 +3,7 @@
 #include <functional>
 #include <string>
 #include <cstdint>
+#include <vector>
 
 #include <X11/Xlib.h>
 
@@ -10,9 +11,18 @@ enum class VideoMode { Fit, Crop, Stretch };
 
 struct Ratio { std::int64_t width = 2732; std::int64_t height = 768; };
 
+struct DisplayGeometry {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
+
 struct PlayerSettings {
     Ratio ratio;
     VideoMode mode = VideoMode::Fit;
+    int display1 = 0;
+    int display2 = 1;
 };
 
 struct _GtkWidget;
@@ -45,7 +55,9 @@ public:
     void pump_events();
     bool is_visible() const;
 
-    void show_settings_dialog(const PlayerSettings& settings, SettingsCallback apply);
+    void show_settings_dialog(const PlayerSettings& settings,
+                              const std::vector<DisplayGeometry>& displays,
+                              SettingsCallback apply);
     void set_settings_callback(VoidCallback settings);
 
 private:

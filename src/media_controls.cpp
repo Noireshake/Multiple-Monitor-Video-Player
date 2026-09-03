@@ -265,7 +265,9 @@ void MediaControls::pump_events()
     }
 }
 
-void MediaControls::show_settings_dialog(const PlayerSettings& settings, SettingsCallback apply)
+void MediaControls::show_settings_dialog(const PlayerSettings& settings,
+                                          const std::vector<DisplayGeometry>& displays,
+                                          SettingsCallback apply)
 {
     if (impl_->settings_open) return;
     impl_->settings_open = true;
@@ -279,7 +281,7 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings, Setting
     if (gtk_display) gtk_window_set_display(GTK_WINDOW(dialog), gtk_display);
     gtk_window_set_title(GTK_WINDOW(dialog), "VLC Spanning Player Settings");
     gtk_window_set_modal(GTK_WINDOW(dialog), true);
-    gtk_window_set_default_size(GTK_WINDOW(dialog), 420, 260);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 460, 390);
     GtkWidget* root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_set_margin_top(root, 18); gtk_widget_set_margin_bottom(root, 18);
     gtk_widget_set_margin_start(root, 18); gtk_widget_set_margin_end(root, 18);
@@ -289,6 +291,27 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings, Setting
     GtkWidget* mode = gtk_drop_down_new_from_strings(modes);
     gtk_drop_down_set_selected(GTK_DROP_DOWN(mode), settings.mode == VideoMode::Fit ? 0 : settings.mode == VideoMode::Crop ? 1 : 2);
     gtk_box_append(GTK_BOX(root), mode);
+    gtk_box_append(GTK_BOX(root), gtk_label_new("Display arrangement"));
+    std::vector<std::string> display_names;
+    for (std::size_t index = 0; index < displays.size(); ++index) {
+        display_names.push_back("Display " + std::to_string(index + 1) + " (" +
+                                std::to_string(displays[index].width) + "x" +
+                                std::to_string(displays[index].height) + ")");
+    }
+    std::vector<const char*> display_name_ptrs;
+    for (const auto& name : display_names) display_name_ptrs.push_back(name.c_str());
+    display_name_ptrs.push_back(nullptr);
+    GtkWidget* display1 = gtk_drop_down_new_from_strings(display_name_ptrs.data());
+    GtkWidget* display2 = gtk_drop_down_new_from_strings(display_name_ptrs.data());
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(display1), settings.display1 < static_cast<int>(displays.size()) ? settings.display1 : 0);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(display2), settings.display2 < static_cast<int>(displays.size()) ? settings.display2 : displays.size() > 1 ? 1 : 0);
+    gtk_box_append(GTK_BOX(root), gtk_label_new("Display 1"));
+    gtk_box_append(GTK_BOX(root), display1);
+    gtk_box_append(GTK_BOX(root), gtk_label_new("Display 2"));
+    gtk_box_append(GTK_BOX(root), display2);
+    GtkWidget* display_info = gtk_label_new("");
+    gtk_label_set_wrap(GTK_LABEL(display_info), true);
+    gtk_box_append(GTK_BOX(root), display_info);
     gtk_box_append(GTK_BOX(root), gtk_label_new("Target aspect ratio (W:H)"));
     GtkWidget* ratio = gtk_entry_new();
     const std::string current_ratio = std::to_string(settings.ratio.width) + ":" + std::to_string(settings.ratio.height);
@@ -300,19 +323,50 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings, Setting
     GtkWidget* cancel = gtk_button_new_with_label("Cancel");
     GtkWidget* apply_button = gtk_button_new_with_label("Apply");
     gtk_box_append(GTK_BOX(buttons), reset); gtk_box_append(GTK_BOX(buttons), cancel); gtk_box_append(GTK_BOX(buttons), apply_button);
+    struct DisplayData { GtkWidget* display1; GtkWidget* display2; GtkWidget* info; std::vector<DisplayGeometry> displays; };
+    auto* display_data = new DisplayData{display1, display2, display_info, displays};
+    auto update_display_info = +[](DisplayData* data) {
+        const guint first = gtk_drop_down_get_selected(GTK_DROP_DOWN(data->display1));
+        const guint second = gtk_drop_down_get_selected(GTK_DROP_DOWN(data->display2));
+        if (first >= data->displays.size() || second >= data->displays.size() || first == second) {
+            gtk_label_set_text(GTK_LABEL(data->info), "Choose two different displays.");
+            return;
+        }
+        const auto& one = data->displays[first];
+        const auto& two = data->displays[second];
+        const int left = std::min(one.x, two.x);
+        const int top = std::min(one.y, two.y);
+        const int right = std::max(one.x + one.width, two.x + two.width);
+        const int bottom = std::max(one.y + one.height, two.y + two.height);
+        const int width = right - left;
+        const int height = bottom - top;
+        std::ostringstream text;
+        text << "Selected resolutions: " << one.width << "x" << one.height << " + "
+             << two.width << "x" << two.height << "\nCombined canvas: " << width << "x" << height
+             << " (aspect ratio " << std::fixed << std::setprecision(3)
+             << static_cast<double>(width) / height << ":1)";
+        gtk_label_set_text(GTK_LABEL(data->info), text.str().c_str());
+    };
+    g_signal_connect_swapped(display1, "notify::selected", G_CALLBACK(update_display_info), display_data);
+    g_signal_connect_swapped(display2, "notify::selected", G_CALLBACK(update_display_info), display_data);
+    update_display_info(display_data);
     g_signal_connect_swapped(reset, "clicked", G_CALLBACK(+[](GtkWidget* value) {
         gtk_drop_down_set_selected(GTK_DROP_DOWN(g_object_get_data(G_OBJECT(value), "mode")), 0);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(g_object_get_data(G_OBJECT(value), "display1")), 0);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(g_object_get_data(G_OBJECT(value), "display2")), 1);
         gtk_editable_set_text(GTK_EDITABLE(g_object_get_data(G_OBJECT(value), "ratio")), "2732:768");
     }), reset);
     g_object_set_data(G_OBJECT(reset), "mode", mode); g_object_set_data(G_OBJECT(reset), "ratio", ratio);
-    struct ApplyData { MediaControls::Impl* impl; SettingsCallback apply; GtkWidget* dialog; GtkWidget* mode; GtkWidget* ratio; GtkWidget* status; PlayerSettings current; bool finished = false; };
-    auto* data = new ApplyData{impl_, std::move(apply), dialog, mode, ratio, status, settings};
+    g_object_set_data(G_OBJECT(reset), "display1", display1); g_object_set_data(G_OBJECT(reset), "display2", display2);
+    struct ApplyData { MediaControls::Impl* impl; SettingsCallback apply; GtkWidget* dialog; GtkWidget* mode; GtkWidget* ratio; GtkWidget* status; GtkWidget* display1; GtkWidget* display2; DisplayData* display_data; PlayerSettings current; std::size_t display_count; bool finished = false; };
+    auto* data = new ApplyData{impl_, std::move(apply), dialog, mode, ratio, status, display1, display2, display_data, settings, displays.size()};
     g_signal_connect(cancel, "clicked", G_CALLBACK((+[](GtkButton*, gpointer raw) {
         auto* data = static_cast<ApplyData*>(raw);
         data->finished = true;
         data->apply = nullptr;
         gtk_window_destroy(GTK_WINDOW(data->dialog));
         data->impl->settings_open = false;
+        delete data->display_data;
         delete data;
     })), data);
     g_signal_connect(apply_button, "clicked", G_CALLBACK((+[](GtkButton*, gpointer raw) {
@@ -327,15 +381,24 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings, Setting
             data->current.ratio = Ratio{width, height};
             const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(data->mode));
             data->current.mode = selected == 0 ? VideoMode::Fit : selected == 1 ? VideoMode::Crop : VideoMode::Stretch;
+            const guint first_display = gtk_drop_down_get_selected(GTK_DROP_DOWN(data->display1));
+            const guint second_display = gtk_drop_down_get_selected(GTK_DROP_DOWN(data->display2));
+            if (first_display >= data->display_count || second_display >= data->display_count || first_display == second_display)
+                throw std::invalid_argument("displays");
+            data->current.display1 = static_cast<int>(first_display);
+            data->current.display2 = static_cast<int>(second_display);
             if (data->apply) data->apply(data->current);
             data->finished = true;
             data->impl->settings_open = false;
-            gtk_window_destroy(GTK_WINDOW(data->dialog)); delete data;
-        } catch (const std::exception&) { gtk_label_set_text(GTK_LABEL(data->status), "Use positive integers in W:H format."); }
+            gtk_window_destroy(GTK_WINDOW(data->dialog)); delete data->display_data; delete data;
+        } catch (const std::exception& error) {
+            gtk_label_set_text(GTK_LABEL(data->status), std::string(error.what()) == "displays" ?
+                               "Choose two different displays." : "Use positive integers in W:H format.");
+        }
     })), data);
     g_signal_connect(dialog, "close-request", G_CALLBACK((+[](GtkWindow* window, gpointer raw) {
         auto* data = static_cast<ApplyData*>(raw);
-        if (!data->finished) { data->finished = true; data->impl->settings_open = false; delete data; }
+        if (!data->finished) { data->finished = true; data->impl->settings_open = false; delete data->display_data; delete data; }
         gtk_window_destroy(window);
         return true;
     })), data);

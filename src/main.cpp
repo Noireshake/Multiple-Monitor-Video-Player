@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "media_controls.hpp"
 struct WindowState { bool fullscreen = false; int x = 0; int y = 0; int width = 0; int height = 0; };
@@ -70,33 +71,43 @@ static std::string ratio_string(const Ratio& ratio)
     return std::to_string(ratio.width) + ":" + std::to_string(ratio.height);
 }
 
-static bool get_spanning_bounds(int display_count, SDL_Rect& out)
+static bool get_display_bounds(int display_count, std::vector<DisplayGeometry>& displays)
 {
-    if (display_count <= 0) return false;
-    SDL_Rect first{};
-    if (SDL_GetDisplayBounds(0, &first) != 0) return false;
-    int left = first.x, top = first.y, right = first.x + first.w, bottom = first.y + first.h;
-    for (int i = 1; i < display_count; ++i) {
+    displays.clear();
+    for (int i = 0; i < display_count; ++i) {
         SDL_Rect current{};
         if (SDL_GetDisplayBounds(i, &current) != 0) {
             std::cerr << "SDL_GetDisplayBounds(" << i << ") failed: " << SDL_GetError() << '\n';
             return false;
         }
-        left = std::min(left, current.x); top = std::min(top, current.y);
-        right = std::max(right, current.x + current.w); bottom = std::max(bottom, current.y + current.h);
+        displays.push_back(DisplayGeometry{current.x, current.y, current.w, current.h});
     }
+    return !displays.empty();
+}
+
+static bool get_selected_bounds(const std::vector<DisplayGeometry>& displays,
+                                int first_display, int second_display, SDL_Rect& out)
+{
+    if (first_display < 0 || second_display < 0 ||
+        first_display >= static_cast<int>(displays.size()) ||
+        second_display >= static_cast<int>(displays.size()) || first_display == second_display) return false;
+    const auto& first = displays[first_display];
+    const auto& second = displays[second_display];
+    const int left = std::min(first.x, second.x);
+    const int top = std::min(first.y, second.y);
+    const int right = std::max(first.x + first.width, second.x + second.width);
+    const int bottom = std::max(first.y + first.height, second.y + second.height);
     out = SDL_Rect{left, top, right - left, bottom - top};
     return out.w > 0 && out.h > 0;
 }
 
-static void print_displays(int count, const SDL_Rect& span, const Ratio& target)
+static void print_displays(const std::vector<DisplayGeometry>& displays, const SDL_Rect& span, const Ratio& target)
 {
-    std::cout << "Number of displays: " << count << '\n';
-    for (int i = 0; i < count; ++i) {
-        SDL_Rect bounds{};
-        if (SDL_GetDisplayBounds(i, &bounds) == 0)
-            std::cout << "Display " << i << " geometry: " << bounds.w << 'x' << bounds.h
-                      << " at (" << bounds.x << ", " << bounds.y << ")\n";
+    std::cout << "Number of displays: " << displays.size() << '\n';
+    for (std::size_t i = 0; i < displays.size(); ++i) {
+        const auto& bounds = displays[i];
+        std::cout << "Display " << i + 1 << " geometry: " << bounds.width << 'x' << bounds.height
+                  << " at (" << bounds.x << ", " << bounds.y << ")\n";
     }
     std::cout << "Combined desktop geometry: " << span.w << 'x' << span.h << " at ("
               << span.x << ", " << span.y << ")\nCombined width: " << span.w
@@ -277,9 +288,11 @@ int main(int argc, char* argv[])
     }
     const int display_count = SDL_GetNumVideoDisplays();
     if (display_count < 2) { std::cerr << "Need at least 2 displays; found " << display_count << ".\n"; SDL_Quit(); return 1; }
+    std::vector<DisplayGeometry> displays;
+    if (!get_display_bounds(display_count, displays)) { std::cerr << "Could not read display geometry.\n"; SDL_Quit(); return 1; }
     SDL_Rect span{};
-    if (!get_spanning_bounds(display_count, span)) { std::cerr << "Could not calculate combined desktop geometry.\n"; SDL_Quit(); return 1; }
-    print_displays(display_count, span, settings.ratio);
+    if (!get_selected_bounds(displays, settings.display1, settings.display2, span)) { std::cerr << "Could not calculate selected display geometry.\n"; SDL_Quit(); return 1; }
+    print_displays(displays, span, settings.ratio);
 
     SDL_Window* window = SDL_CreateWindow("VLC Spanning Player", span.x, span.y, span.w, span.h,
                                           SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_INPUT_FOCUS);
@@ -291,8 +304,8 @@ int main(int argc, char* argv[])
     XStoreName(display, xwindow, "VLC Spanning Player");
     SDL_SetWindowPosition(window, span.x, span.y); SDL_SetWindowSize(window, span.w, span.h);
 
-    const char* const vlc_args[] = {"--no-video-title-show", "--no-osd"};
-    libvlc_instance_t* vlc = libvlc_new(2, vlc_args);
+    const char* const vlc_args[] = {"--no-video-title-show", "--no-osd", "--avcodec-hw=none", "--vout=xcb_x11"};
+    libvlc_instance_t* vlc = libvlc_new(4, vlc_args);
     if (!vlc) { std::cerr << "libvlc_new failed.\n"; SDL_DestroyWindow(window); SDL_Quit(); return 1; }
     libvlc_media_t* media = nullptr;
     libvlc_media_player_t* player = libvlc_media_player_new(vlc);
@@ -339,7 +352,13 @@ int main(int argc, char* argv[])
     auto set_volume = [&](int volume) { libvlc_audio_set_volume(player, std::clamp(volume, 0, 100)); };
     auto apply_settings = [&](const PlayerSettings& updated) {
         const float position = media ? libvlc_media_player_get_position(player) : 0.0f;
+        SDL_Rect selected_span{};
+        if (!get_selected_bounds(displays, updated.display1, updated.display2, selected_span)) return;
         settings = updated;
+        SDL_SetWindowPosition(window, selected_span.x, selected_span.y);
+        SDL_SetWindowSize(window, selected_span.w, selected_span.h);
+        state.x = selected_span.x; state.y = selected_span.y;
+        state.width = selected_span.w; state.height = selected_span.h;
         if (!current_video.empty()) {
             load_media(current_video);
             libvlc_media_player_set_position(player, position);
@@ -362,7 +381,7 @@ int main(int argc, char* argv[])
                              static_cast<unsigned int>(state.width),
                              static_cast<unsigned int>(state.height));
     controls_ptr = &controls;
-    controls.set_settings_callback([&] { controls.show_settings_dialog(settings, apply_settings); });
+    controls.set_settings_callback([&] { controls.show_settings_dialog(settings, displays, apply_settings); });
     if (video_path.empty()) controls.show_welcome();
     else load_media(video_path);
 
@@ -404,7 +423,7 @@ int main(int argc, char* argv[])
                     break;
                 case SDLK_s:
                     if ((event.key.keysym.mod & KMOD_CTRL) != 0 && controls_ptr) {
-                        controls_ptr->show_settings_dialog(settings, apply_settings);
+                        controls_ptr->show_settings_dialog(settings, displays, apply_settings);
                     }
                     break;
                 case SDLK_q: running = false; break;

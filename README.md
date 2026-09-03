@@ -35,6 +35,16 @@ ratio to the target and may distort the source.
 
 The default target is the exact ratio `2732:768`, not `32:9`.
 
+For reliable X11 embedding, the player uses LibVLC's `xcb_x11` video output
+and software decoding. This avoids VA-API driver initialization failures on
+systems where the installed graphics driver does not expose a usable VA-API
+device.
+
+The Settings menu lets you select Display 1 and Display 2. It shows both
+native resolutions, the combined canvas resolution, and the calculated canvas
+aspect ratio live. Applying the selection moves and resizes the player to the
+union of the selected monitors.
+
 LibVLC supplies the codec support, so the player accepts the formats handled
 by the installed VLC build, including MP4, MKV, AVI, MOV, WebM, MPEG, TS,
 M4V, FLV, OGG, and common 3GP/ASF variants. The control bar is translucent,
