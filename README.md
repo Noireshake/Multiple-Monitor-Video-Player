@@ -1,4 +1,5 @@
 # VLC Spanning Player for Ubuntu
+<img width="2732" height="767" alt="image" src="https://github.com/user-attachments/assets/09a098d1-171e-466a-8ab7-4dfb1fe58b46" />
 
 This program creates ONE decorated, resizable X11 window covering the complete
 X11 virtual desktop and embeds LibVLC into that window. The result is one
