@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=VLC Spanning Player
+Comment=Dual-monitor wide-screen media player
+Exec=vlc_spanning %U
+Icon=com.noirshake.VLCSpanning
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/x-msvideo;video/quicktime;video/webm;video/mpeg;video/mp2t;video/x-m4v;video/x-flv;video/ogg;video/3gpp;video/3gpp2;video/x-ms-asf;video/x-ogm;video/x-matroska-3d;
+StartupNotify=true
