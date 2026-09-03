@@ -275,6 +275,8 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings, Setting
         return;
     }
     GtkWidget* dialog = gtk_window_new();
+    GdkDisplay* gtk_display = gdk_display_get_default();
+    if (gtk_display) gtk_window_set_display(GTK_WINDOW(dialog), gtk_display);
     gtk_window_set_title(GTK_WINDOW(dialog), "VLC Spanning Player Settings");
     gtk_window_set_modal(GTK_WINDOW(dialog), true);
     gtk_window_set_default_size(GTK_WINDOW(dialog), 420, 260);
@@ -341,6 +343,11 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings, Setting
     gtk_widget_set_visible(dialog, true);
     std::cout << "Player settings dialog shown" << std::endl;
     while (g_main_context_pending(nullptr)) g_main_context_iteration(nullptr, false);
+}
+
+void MediaControls::set_settings_callback(VoidCallback settings)
+{
+    impl_->settings = std::move(settings);
 }
 
 bool MediaControls::is_visible() const { return impl_->visible; }

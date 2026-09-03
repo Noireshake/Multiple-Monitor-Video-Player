@@ -46,6 +46,7 @@ public:
     bool is_visible() const;
 
     void show_settings_dialog(const PlayerSettings& settings, SettingsCallback apply);
+    void set_settings_callback(VoidCallback settings);
 
 private:
     Impl* impl_;

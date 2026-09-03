@@ -357,10 +357,12 @@ int main(int argc, char* argv[])
     MediaControls controls(display, xwindow, load_media, toggle_play,
                            toggle_player_fullscreen,
                            [&] { libvlc_audio_toggle_mute(player); },
-                           seek, set_volume, [&] { if (controls_ptr) controls_ptr->show_settings_dialog(settings, apply_settings); });
+                           seek, set_volume, {});
     controls.update_position(state.x, state.y,
                              static_cast<unsigned int>(state.width),
                              static_cast<unsigned int>(state.height));
+    controls_ptr = &controls;
+    controls.set_settings_callback([&] { controls.show_settings_dialog(settings, apply_settings); });
     if (video_path.empty()) controls.show_welcome();
     else load_media(video_path);
 
