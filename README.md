@@ -6,6 +6,11 @@ X11 virtual desktop and embeds LibVLC into that window. The result is one
 video surface spanning both monitors. Press `F` to switch that same window to
 explicit combined-desktop fullscreen.
 
+At startup the video window is hidden. With no command-line input, the app
+opens the file/URL picker and creates the spanning video window only after
+media is selected. The controls are a separate small X11 overlay placed over
+the video window; there is only one video player and one video surface.
+
 ## Important limitation
 
 `libvlc_media_player_set_xwindow()` is specifically an X11 embedding API.
@@ -63,7 +68,6 @@ For Ubuntu 24.04:
         libsdl2-dev \
         libvlc-dev \
         libvlccore-dev \
-        vlc \
         yt-dlp \
         libx11-dev \
         libgtk-4-dev
@@ -126,9 +130,10 @@ The latest preserved package artifact is `vlc-spanning_1.4_amd64.deb` in the
 project root. The source is under `src/` and application resources are under
 `resources/`.
 
-This installs `vlc_spanning`, the `VLC Spanning Player` GNOME launcher, and an
-original application icon. The launcher accepts files opened from GNOME Files
-through its registered video MIME types.
+This installs `vlc_spanning`, the `VLC Spanning Player` GNOME launcher, an
+original application icon, and a private LibVLC runtime with its plugins and
+data. The installed app does not require the VLC desktop package. The launcher
+accepts files opened from GNOME Files through its registered video MIME types.
 
 CROP mode:
 

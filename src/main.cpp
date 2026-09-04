@@ -360,6 +360,14 @@ static void configure_video(libvlc_media_player_t* player, const PlayerSettings&
     libvlc_video_set_scale(player, 0);
 }
 
+static std::filesystem::path executable_directory()
+{
+    std::error_code error;
+    const auto executable = std::filesystem::read_symlink("/proc/self/exe", error);
+    if (error) return {};
+    return std::filesystem::absolute(executable, error).parent_path();
+}
+
 int main(int argc, char* argv[])
 {
     PlayerSettings settings; std::string video_path; bool help_requested = false;
@@ -394,7 +402,7 @@ int main(int argc, char* argv[])
     print_displays(displays, span, settings.ratio);
 
     SDL_Window* window = SDL_CreateWindow("VLC Spanning Player", span.x, span.y, span.w, span.h,
-                                          SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_INPUT_FOCUS);
+                                          SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_INPUT_FOCUS);
     if (!window) { std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << '\n'; SDL_Quit(); return 1; }
     Display* display = nullptr; Window xwindow = 0;
     if (!get_x11_window(window, display, xwindow)) { SDL_DestroyWindow(window); SDL_Quit(); return 1; }
@@ -403,8 +411,29 @@ int main(int argc, char* argv[])
     XStoreName(display, xwindow, "VLC Spanning Player");
     SDL_SetWindowPosition(window, span.x, span.y); SDL_SetWindowSize(window, span.w, span.h);
 
-    const char* const vlc_args[] = {"--no-video-title-show", "--no-osd", "--avcodec-hw=none", "--vout=xcb_x11"};
-    libvlc_instance_t* vlc = libvlc_new(4, vlc_args);
+    const std::filesystem::path executable_dir = executable_directory();
+    const std::filesystem::path bundled_root = executable_dir.empty()
+        ? std::filesystem::path{}
+        : executable_dir.parent_path() / "lib" / "vlc-spanning";
+    const std::filesystem::path bundled_plugins = bundled_root / "plugins";
+    const std::filesystem::path bundled_data = executable_dir.empty()
+        ? std::filesystem::path{}
+        : executable_dir.parent_path() / "share" / "vlc-spanning";
+    std::vector<std::string> vlc_arguments{
+        "--no-video-title-show", "--no-osd", "--avcodec-hw=none", "--vout=xcb_x11"
+    };
+    if (std::filesystem::is_directory(bundled_plugins)) {
+        vlc_arguments.push_back("--plugin-path");
+        vlc_arguments.push_back(bundled_plugins.string());
+    }
+    if (std::filesystem::is_directory(bundled_data)) {
+        vlc_arguments.push_back("--data-path");
+        vlc_arguments.push_back(bundled_data.string());
+    }
+    std::vector<const char*> vlc_argument_ptrs;
+    vlc_argument_ptrs.reserve(vlc_arguments.size());
+    for (const auto& argument : vlc_arguments) vlc_argument_ptrs.push_back(argument.c_str());
+    libvlc_instance_t* vlc = libvlc_new(static_cast<int>(vlc_argument_ptrs.size()), vlc_argument_ptrs.data());
     if (!vlc) { std::cerr << "libvlc_new failed.\n"; SDL_DestroyWindow(window); SDL_Quit(); return 1; }
     libvlc_media_t* media = nullptr;
     libvlc_media_player_t* player = libvlc_media_player_new(vlc);
@@ -444,6 +473,8 @@ int main(int argc, char* argv[])
         const std::string title = "VLC Spanning Player - " +
             (is_network_location(path) ? path : std::filesystem::path(path).filename().string());
         SDL_SetWindowTitle(window, title.c_str());
+        SDL_ShowWindow(window);
+        SDL_RaiseWindow(window);
         if (libvlc_media_player_play(player) != 0) std::cerr << "libvlc_media_player_play failed.\n";
         if (controls_ptr) controls_ptr->show_controls();
     };
@@ -491,7 +522,10 @@ int main(int argc, char* argv[])
                              static_cast<unsigned int>(state.height));
     controls_ptr = &controls;
     controls.set_settings_callback([&] { controls.show_settings_dialog(settings, displays, apply_settings); });
-    if (video_path.empty()) controls.show_welcome();
+    if (video_path.empty()) {
+        controls.show_welcome();
+        controls.open_file_dialog();
+    }
     else load_media(video_path);
 
     bool running = true; SDL_Event event{};
@@ -550,6 +584,9 @@ int main(int argc, char* argv[])
                      media ? libvlc_media_player_get_position(player) : 0.0f, duration);
         SDL_Delay(50);
     }
-    libvlc_media_player_stop(player); libvlc_media_player_release(player); libvlc_media_release(media); libvlc_release(vlc);
+    libvlc_media_player_stop(player);
+    libvlc_media_player_release(player);
+    if (media) libvlc_media_release(media);
+    libvlc_release(vlc);
     SDL_DestroyWindow(window); SDL_Quit(); return 0;
 }

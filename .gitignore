@@ -5,3 +5,5 @@ build/
 *~
 core
 core.*
+_CPack_Packages/
+*.deb
