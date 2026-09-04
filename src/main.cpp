@@ -6,6 +6,7 @@
 #include <X11/Xlib.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -19,12 +20,13 @@ struct WindowState { bool fullscreen = false; int x = 0; int y = 0; int width = 
 
 static void print_help(const char* program)
 {
-    std::cout << "Usage:\n  " << program << " [options] <video>\n\n"
+    std::cout << "Usage:\n  " << program << " [options] <video-or-url>\n\n"
               << "Options:\n"
               << "  --ratio W:H       Target display aspect ratio (default 2732:768)\n"
               << "  --fit             Preserve aspect ratio and fit entire video\n"
               << "  --crop            Preserve aspect ratio and fill canvas by cropping\n"
               << "  --stretch         Fill canvas even if video is distorted\n"
+              << "  --quality VALUE   YouTube quality: auto, 2160, 1440, 1080, 720, 480, 360, 240\n"
               << "  --help            Show this help\n\n"
               << "Keys: F fullscreen, ESC exit fullscreen/quit, SPACE pause/resume, Q quit\n";
 }
@@ -46,6 +48,20 @@ static bool parse_ratio(const std::string& value, Ratio& ratio)
     } catch (const std::exception&) { return false; }
 }
 
+static bool parse_quality(const std::string& value, VideoQuality& quality)
+{
+    if (value == "auto") quality = VideoQuality::Auto;
+    else if (value == "2160") quality = VideoQuality::P2160;
+    else if (value == "1440") quality = VideoQuality::P1440;
+    else if (value == "1080") quality = VideoQuality::P1080;
+    else if (value == "720") quality = VideoQuality::P720;
+    else if (value == "480") quality = VideoQuality::P480;
+    else if (value == "360") quality = VideoQuality::P360;
+    else if (value == "240") quality = VideoQuality::P240;
+    else return false;
+    return true;
+}
+
 static bool parse_options(int argc, char* argv[], PlayerSettings& settings, std::string& video_path, bool& help_requested)
 {
     for (int i = 1; i < argc; ++i) {
@@ -58,10 +74,15 @@ static bool parse_options(int argc, char* argv[], PlayerSettings& settings, std:
             if (++i >= argc || !parse_ratio(argv[i], settings.ratio)) {
                 std::cerr << "Invalid --ratio; expected positive W:H.\n"; return false;
             }
+        } else if (argument == "--quality") {
+            if (++i >= argc || !parse_quality(argv[i], settings.quality)) {
+                std::cerr << "Invalid --quality; expected auto, 2160, 1440, 1080, 720, 480, 360, or 240.\n";
+                return false;
+            }
         } else if (argument.rfind("--", 0) == 0) {
             std::cerr << "Unknown option: " << argument << '\n'; return false;
         } else if (video_path.empty()) video_path = argument;
-        else { std::cerr << "Only one video file may be specified.\n"; return false; }
+        else { std::cerr << "Only one video file or URL may be specified.\n"; return false; }
     }
     return true;
 }
@@ -69,6 +90,84 @@ static bool parse_options(int argc, char* argv[], PlayerSettings& settings, std:
 static std::string ratio_string(const Ratio& ratio)
 {
     return std::to_string(ratio.width) + ":" + std::to_string(ratio.height);
+}
+
+static bool is_network_location(const std::string& value)
+{
+    return value.rfind("http://", 0) == 0 || value.rfind("https://", 0) == 0;
+}
+
+static bool is_youtube_location(const std::string& value)
+{
+    return value.find("youtube.com/") != std::string::npos ||
+           value.find("youtu.be/") != std::string::npos ||
+           value.find("youtube-nocookie.com/") != std::string::npos;
+}
+
+static std::string shell_quote(const std::string& value)
+{
+    std::string quoted = "'";
+    for (const char character : value) {
+        if (character == '\'') quoted += "'\\''";
+        else quoted += character;
+    }
+    return quoted + "'";
+}
+
+static const char* quality_format(VideoQuality quality)
+{
+    switch (quality) {
+    case VideoQuality::P2160: return "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best";
+    case VideoQuality::P1440: return "bestvideo[height<=1440]+bestaudio/best[height<=1440]/best";
+    case VideoQuality::P1080: return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best";
+    case VideoQuality::P720: return "bestvideo[height<=720]+bestaudio/best[height<=720]/best";
+    case VideoQuality::P480: return "bestvideo[height<=480]+bestaudio/best[height<=480]/best";
+    case VideoQuality::P360: return "bestvideo[height<=360]+bestaudio/best[height<=360]/best";
+    case VideoQuality::P240: return "bestvideo[height<=240]+bestaudio/best[height<=240]/best";
+    case VideoQuality::Auto: return "bestvideo*+bestaudio/best";
+    }
+    return "bestvideo*+bestaudio/best";
+}
+
+struct ResolvedMedia {
+    std::string video;
+    std::string audio;
+};
+
+static bool resolve_youtube_location(const std::string& source, VideoQuality quality,
+                                     ResolvedMedia& media)
+{
+    if (!is_youtube_location(source)) {
+        media.video = source;
+        media.audio.clear();
+        return true;
+    }
+    const std::string command = "yt-dlp --no-warnings --no-playlist --format " +
+                                shell_quote(quality_format(quality)) + " --get-url " + shell_quote(source);
+    FILE* stream = popen(command.c_str(), "r");
+    if (!stream) {
+        std::cerr << "Could not start yt-dlp. Install it with: sudo apt install yt-dlp\n";
+        return false;
+    }
+    char buffer[4096]{};
+    std::string video_location;
+    std::string audio_location;
+    std::size_t location_count = 0;
+    while (fgets(buffer, sizeof(buffer), stream)) {
+        std::string location(buffer);
+        while (!location.empty() && (location.back() == '\n' || location.back() == '\r')) location.pop_back();
+        if (!location.empty() && location_count++ == 0) video_location = std::move(location);
+        else if (!location.empty() && audio_location.empty()) audio_location = std::move(location);
+    }
+    const int status = pclose(stream);
+    if (status != 0 || video_location.empty()) {
+        std::cerr << "yt-dlp could not extract a playable stream URL. Update it with: "
+                  << "sudo apt install --only-upgrade yt-dlp\n";
+        return false;
+    }
+    media.video = std::move(video_location);
+    media.audio = std::move(audio_location);
+    return true;
 }
 
 static bool get_display_bounds(int display_count, std::vector<DisplayGeometry>& displays)
@@ -266,7 +365,7 @@ int main(int argc, char* argv[])
     PlayerSettings settings; std::string video_path; bool help_requested = false;
     if (!parse_options(argc, argv, settings, video_path, help_requested)) return 1;
     if (help_requested) return 0;
-    if (!video_path.empty()) {
+    if (!video_path.empty() && !is_network_location(video_path)) {
         const std::filesystem::path video_path_path(video_path);
         std::error_code file_error;
         if (!std::filesystem::is_regular_file(video_path_path, file_error)) {
@@ -320,20 +419,30 @@ int main(int argc, char* argv[])
     SDL_GetWindowSize(window, &state.width, &state.height);
     MediaControls* controls_ptr = nullptr;
     auto load_media = [&](const std::string& path) {
-        std::error_code file_error;
-        if (!std::filesystem::is_regular_file(path, file_error)) {
-            std::cerr << "Video file does not exist or is not a regular file: " << path << '\n';
-            return;
+        if (!is_network_location(path)) {
+            std::error_code file_error;
+            if (!std::filesystem::is_regular_file(path, file_error)) {
+                std::cerr << "Video file does not exist or is not a regular file: " << path << '\n';
+                return;
+            }
         }
+        ResolvedMedia resolved_media;
+        if (!resolve_youtube_location(path, settings.quality, resolved_media)) return;
         if (media) { libvlc_media_player_stop(player); libvlc_media_release(media); media = nullptr; }
-        media = libvlc_media_new_path(vlc, path.c_str());
+        media = is_network_location(path) ? libvlc_media_new_location(vlc, resolved_media.video.c_str())
+                                          : libvlc_media_new_path(vlc, resolved_media.video.c_str());
         if (!media) { std::cerr << "Failed to create media from: " << path << '\n'; return; }
         const std::string crop_option = ":crop=" + ratio_string(settings.ratio);
         if (settings.mode == VideoMode::Crop) libvlc_media_add_option(media, crop_option.c_str());
+        if (!resolved_media.audio.empty()) {
+            const std::string audio_option = ":input-slave=" + resolved_media.audio;
+            libvlc_media_add_option(media, audio_option.c_str());
+        }
         current_video = path;
         libvlc_media_player_set_media(player, media);
         configure_video(player, settings);
-        const std::string title = "VLC Spanning Player - " + std::filesystem::path(path).filename().string();
+        const std::string title = "VLC Spanning Player - " +
+            (is_network_location(path) ? path : std::filesystem::path(path).filename().string());
         SDL_SetWindowTitle(window, title.c_str());
         if (libvlc_media_player_play(player) != 0) std::cerr << "libvlc_media_player_play failed.\n";
         if (controls_ptr) controls_ptr->show_controls();

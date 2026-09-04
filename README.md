@@ -64,6 +64,7 @@ For Ubuntu 24.04:
         libvlc-dev \
         libvlccore-dev \
         vlc \
+        yt-dlp \
         libx11-dev \
         libgtk-4-dev
 
@@ -83,8 +84,8 @@ Check the executable:
 
     ./build/vlc_spanning --help
 
-The program itself uses positional video input, so --help is expected to
-print the usage line and exit.
+The program itself uses positional video input or an HTTP(S) URL, so --help is
+expected to print the usage line and exit.
 
 ## Run
 
@@ -92,14 +93,36 @@ Normal window, FIT mode:
 
     SDL_VIDEODRIVER=x11 ./build/vlc_spanning "$HOME/Videos/test.mp4"
 
-With no argument, the installed launcher opens a welcome screen with a native
-Open Video dialog. The same dialog is available through `Ctrl+O` while playing.
+YouTube URL, FIT mode:
+
+    SDL_VIDEODRIVER=x11 ./build/vlc_spanning 'https://www.youtube.com/watch?v=VIDEO_ID'
+
+YouTube playback uses `yt-dlp` to resolve a current direct stream URL before
+passing it to LibVLC. The same `--fit`, `--crop`, `--stretch`, and `--ratio`
+options apply to URLs as they do to local video files. Keep the URL quoted
+when it contains `&`.
+
+YouTube quality can be selected in Player Settings or at startup. `auto`
+selects the best available quality; a numeric value caps the video height:
+
+    SDL_VIDEODRIVER=x11 ./build/vlc_spanning --quality 720 'https://www.youtube.com/watch?v=VIDEO_ID'
+
+Quality selection applies to YouTube URLs. Local files use the quality encoded
+in the file and are not transcoded.
+
+If YouTube extraction fails, update the extractor with:
+
+    sudo apt install --only-upgrade yt-dlp
+
+With no argument, the installed launcher opens a welcome screen. The Open
+control and `Ctrl+O` show a dialog that can browse for a local video or accept
+an HTTP(S)/YouTube URL.
 
 ## Install the desktop application
 
     sudo cmake --install build
 
-The latest preserved package artifact is `vlc-spanning_1.3_amd64.deb` in the
+The latest preserved package artifact is `vlc-spanning_1.4_amd64.deb` in the
 project root. The source is under `src/` and application resources are under
 `resources/`.
 

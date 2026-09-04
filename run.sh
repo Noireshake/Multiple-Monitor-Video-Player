@@ -3,7 +3,7 @@ set -euo pipefail
 
 VIDEO="${1:-}"
 
-if [[ -n "$VIDEO" && ! -f "$VIDEO" ]]; then
+if [[ -n "$VIDEO" && ! "$VIDEO" =~ ^https?:// && ! -f "$VIDEO" ]]; then
     echo "Video not found: $VIDEO"
     exit 1
 fi

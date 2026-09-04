@@ -8,6 +8,7 @@
 #include <X11/Xlib.h>
 
 enum class VideoMode { Fit, Crop, Stretch };
+enum class VideoQuality { Auto, P2160, P1440, P1080, P720, P480, P360, P240 };
 
 struct Ratio { std::int64_t width = 2732; std::int64_t height = 768; };
 
@@ -21,6 +22,7 @@ struct DisplayGeometry {
 struct PlayerSettings {
     Ratio ratio;
     VideoMode mode = VideoMode::Fit;
+    VideoQuality quality = VideoQuality::Auto;
     int display1 = 0;
     int display2 = 1;
 };

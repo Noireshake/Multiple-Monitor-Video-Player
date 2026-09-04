@@ -116,22 +116,91 @@ static void arm_hide(MediaControls::Impl* impl)
     impl->hide_source = g_timeout_add(2500, hide_bar, impl);
 }
 
-static void open_dialog(MediaControls::Impl* impl)
+struct OpenMediaDialogData {
+    MediaControls::Impl* impl;
+    GtkWidget* window;
+    GtkWidget* url;
+    GtkWidget* status;
+};
+
+struct FileDialogData {
+    MediaControls::Impl* impl;
+    GtkWidget* window;
+};
+
+static void open_file_from_dialog(OpenMediaDialogData* data)
 {
     GtkFileDialog* dialog = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(dialog, "Open Video");
+    gtk_file_dialog_set_title(dialog, "Open Video File");
+    auto* file_data = new FileDialogData{data->impl, GTK_WIDGET(g_object_ref(data->window))};
     gtk_file_dialog_open(dialog, nullptr, nullptr,
-        [](GObject* source, GAsyncResult* result, gpointer data) {
-            auto* impl = static_cast<MediaControls::Impl*>(data);
+        [](GObject* source, GAsyncResult* result, gpointer raw) {
+            auto* data = static_cast<FileDialogData*>(raw);
             GError* error = nullptr;
             GFile* file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error);
             if (file) {
                 char* path = g_file_get_path(file);
-                if (path) { impl->open(path); g_free(path); }
+                if (path) { data->impl->open(path); g_free(path); }
                 g_object_unref(file);
+                gtk_window_destroy(GTK_WINDOW(data->window));
             }
             if (error) g_error_free(error);
-        }, impl);
+            g_object_unref(data->window);
+            delete data;
+        }, file_data);
+    g_object_unref(dialog);
+}
+
+static void open_dialog(MediaControls::Impl* impl)
+{
+    if (!gtk_init_check()) return;
+    auto* window = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(window), "Open Media");
+    gtk_window_set_modal(GTK_WINDOW(window), true);
+    gtk_window_set_default_size(GTK_WINDOW(window), 520, 170);
+    auto* root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(root, 18);
+    gtk_widget_set_margin_bottom(root, 18);
+    gtk_widget_set_margin_start(root, 18);
+    gtk_widget_set_margin_end(root, 18);
+    gtk_window_set_child(GTK_WINDOW(window), root);
+
+    gtk_box_append(GTK_BOX(root), gtk_label_new("YouTube or other HTTP(S) URL"));
+    auto* url = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(url), "https://www.youtube.com/watch?v=...");
+    gtk_box_append(GTK_BOX(root), url);
+    auto* status = gtk_label_new("");
+    gtk_box_append(GTK_BOX(root), status);
+    auto* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(root), buttons);
+    auto* browse = gtk_button_new_with_label("Browse Files");
+    auto* cancel = gtk_button_new_with_label("Cancel");
+    auto* open = gtk_button_new_with_label("Open URL");
+    gtk_box_append(GTK_BOX(buttons), browse);
+    gtk_box_append(GTK_BOX(buttons), cancel);
+    gtk_box_append(GTK_BOX(buttons), open);
+
+    auto* data = new OpenMediaDialogData{impl, window, url, status};
+    g_signal_connect(browse, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        open_file_from_dialog(static_cast<OpenMediaDialogData*>(raw));
+    }), data);
+    g_signal_connect(cancel, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        gtk_window_destroy(GTK_WINDOW(static_cast<OpenMediaDialogData*>(raw)->window));
+    }), data);
+    g_signal_connect(open, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        auto* data = static_cast<OpenMediaDialogData*>(raw);
+        const std::string value = gtk_editable_get_text(GTK_EDITABLE(data->url));
+        if (value.rfind("http://", 0) != 0 && value.rfind("https://", 0) != 0) {
+            gtk_label_set_text(GTK_LABEL(data->status), "Enter an HTTP(S) URL.");
+            return;
+        }
+        data->impl->open(value);
+        gtk_window_destroy(GTK_WINDOW(data->window));
+    }), data);
+    g_signal_connect(window, "destroy", G_CALLBACK(+[](GtkWidget*, gpointer raw) {
+        delete static_cast<OpenMediaDialogData*>(raw);
+    }), data);
+    gtk_window_present(GTK_WINDOW(window));
 }
 
 MediaControls::MediaControls(Display* display, Window parent, OpenCallback open, VoidCallback play_pause,
@@ -291,6 +360,11 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings,
     GtkWidget* mode = gtk_drop_down_new_from_strings(modes);
     gtk_drop_down_set_selected(GTK_DROP_DOWN(mode), settings.mode == VideoMode::Fit ? 0 : settings.mode == VideoMode::Crop ? 1 : 2);
     gtk_box_append(GTK_BOX(root), mode);
+    gtk_box_append(GTK_BOX(root), gtk_label_new("YouTube video quality"));
+    const char* qualities[] = {"AUTO (best available)", "2160p", "1440p", "1080p", "720p", "480p", "360p", "240p", nullptr};
+    GtkWidget* quality = gtk_drop_down_new_from_strings(qualities);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(quality), static_cast<guint>(settings.quality));
+    gtk_box_append(GTK_BOX(root), quality);
     gtk_box_append(GTK_BOX(root), gtk_label_new("Display arrangement"));
     std::vector<std::string> display_names;
     for (std::size_t index = 0; index < displays.size(); ++index) {
@@ -352,14 +426,16 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings,
     update_display_info(display_data);
     g_signal_connect_swapped(reset, "clicked", G_CALLBACK(+[](GtkWidget* value) {
         gtk_drop_down_set_selected(GTK_DROP_DOWN(g_object_get_data(G_OBJECT(value), "mode")), 0);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(g_object_get_data(G_OBJECT(value), "quality")), 0);
         gtk_drop_down_set_selected(GTK_DROP_DOWN(g_object_get_data(G_OBJECT(value), "display1")), 0);
         gtk_drop_down_set_selected(GTK_DROP_DOWN(g_object_get_data(G_OBJECT(value), "display2")), 1);
         gtk_editable_set_text(GTK_EDITABLE(g_object_get_data(G_OBJECT(value), "ratio")), "2732:768");
     }), reset);
-    g_object_set_data(G_OBJECT(reset), "mode", mode); g_object_set_data(G_OBJECT(reset), "ratio", ratio);
+    g_object_set_data(G_OBJECT(reset), "mode", mode); g_object_set_data(G_OBJECT(reset), "quality", quality);
+    g_object_set_data(G_OBJECT(reset), "ratio", ratio);
     g_object_set_data(G_OBJECT(reset), "display1", display1); g_object_set_data(G_OBJECT(reset), "display2", display2);
-    struct ApplyData { MediaControls::Impl* impl; SettingsCallback apply; GtkWidget* dialog; GtkWidget* mode; GtkWidget* ratio; GtkWidget* status; GtkWidget* display1; GtkWidget* display2; DisplayData* display_data; PlayerSettings current; std::size_t display_count; bool finished = false; };
-    auto* data = new ApplyData{impl_, std::move(apply), dialog, mode, ratio, status, display1, display2, display_data, settings, displays.size()};
+    struct ApplyData { MediaControls::Impl* impl; SettingsCallback apply; GtkWidget* dialog; GtkWidget* mode; GtkWidget* quality; GtkWidget* ratio; GtkWidget* status; GtkWidget* display1; GtkWidget* display2; DisplayData* display_data; PlayerSettings current; std::size_t display_count; bool finished = false; };
+    auto* data = new ApplyData{impl_, std::move(apply), dialog, mode, quality, ratio, status, display1, display2, display_data, settings, displays.size()};
     g_signal_connect(cancel, "clicked", G_CALLBACK((+[](GtkButton*, gpointer raw) {
         auto* data = static_cast<ApplyData*>(raw);
         data->finished = true;
@@ -381,6 +457,7 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings,
             data->current.ratio = Ratio{width, height};
             const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(data->mode));
             data->current.mode = selected == 0 ? VideoMode::Fit : selected == 1 ? VideoMode::Crop : VideoMode::Stretch;
+            data->current.quality = static_cast<VideoQuality>(gtk_drop_down_get_selected(GTK_DROP_DOWN(data->quality)));
             const guint first_display = gtk_drop_down_get_selected(GTK_DROP_DOWN(data->display1));
             const guint second_display = gtk_drop_down_get_selected(GTK_DROP_DOWN(data->display2));
             if (first_display >= data->display_count || second_display >= data->display_count || first_display == second_display)
