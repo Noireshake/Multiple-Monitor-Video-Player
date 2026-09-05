@@ -31,6 +31,9 @@ If Xwayland is not available, use an Xorg session.
 - Q: quit
 - GNOME Alt+F7: move the normal window
 - GNOME Alt+F8: resize the normal window
+- Open > Search YouTube: search a bounded list of results, inspect the selected
+  thumbnail and metadata, and press Play to load it. Searching never starts
+  playback or creates a second LibVLC player.
 
 ## Display modes
 
@@ -120,7 +123,11 @@ If YouTube extraction fails, update the extractor with:
 
 With no argument, the installed launcher opens a welcome screen. The Open
 control and `Ctrl+O` show a dialog that can browse for a local video or accept
-an HTTP(S)/YouTube URL.
+an HTTP(S)/YouTube URL. The same dialog also provides Search YouTube. Search
+results are limited to 12 lightweight `yt-dlp` entries and thumbnails are
+loaded only for the selected result, so searching does not retain a large
+playlist or download video data. Press Play to pass the selected YouTube URL
+to the existing single LibVLC player.
 
 ## Install the desktop application
 

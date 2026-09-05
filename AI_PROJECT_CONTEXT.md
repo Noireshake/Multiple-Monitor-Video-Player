@@ -17,6 +17,7 @@ VLC Spanning Player is a LibVLC 3.x video player that renders one video into one
 - `src/main.cpp`: application lifecycle, SDL window, LibVLC player, display geometry, EWMH fullscreen, keyboard events
 - `src/media_controls.cpp`: stable X11 child media bar, Xlib drawing, hover timeout, mouse buttons, bar dragging, timeline seeking, GTK4 native file dialog
 - `src/media_controls.hpp`: media-bar public interface
+- `src/youtube_search.cpp/.hpp`: bounded asynchronous `yt-dlp` YouTube search metadata
 - `resources/com.noirshake.VLCSpanning.desktop`: GNOME launcher and video MIME associations
 - `resources/com.noirshake.VLCSpanning.svg`: original application icon
 - `CMakeLists.txt`: CMake, pkg-config dependencies, install rules, CPack DEB configuration
@@ -49,6 +50,9 @@ The stable media bar is an X11 child of the video window. It must remain a singl
 The timeline track must support click-to-seek and drag-to-seek. Programmatic playback updates must not recursively call LibVLC seek or cause playback timestamp churn.
 
 GTK4 is used only for the native Open File dialog. LibVLC remains the authoritative media pipeline. It should accept paths selected from the dialog and reuse the existing player instead of recreating the window or LibVLC instance.
+The Open dialog also launches a GTK4 YouTube search. Keep search results bounded,
+load a thumbnail only for the selected result, and do not start LibVLC playback
+until the user presses Play.
 
 ## Controls
 

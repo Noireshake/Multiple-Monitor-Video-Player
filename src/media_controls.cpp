@@ -1,4 +1,5 @@
 #include "media_controls.hpp"
+#include "youtube_search.hpp"
 
 #include <gtk/gtk.h>
 #include <X11/Xatom.h>
@@ -9,6 +10,7 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <memory>
 #include <utility>
 
 struct MediaControls::Impl {
@@ -123,10 +125,33 @@ struct OpenMediaDialogData {
     GtkWidget* status;
 };
 
+struct SearchDialogData {
+    MediaControls::Impl* impl = nullptr;
+    GtkWidget* window = nullptr;
+    GtkWidget* query = nullptr;
+    GtkWidget* search = nullptr;
+    GtkWidget* status = nullptr;
+    GtkWidget* results = nullptr;
+    GtkWidget* picture = nullptr;
+    GtkWidget* title = nullptr;
+    GtkWidget* metadata = nullptr;
+    GtkWidget* play = nullptr;
+    GtkWidget* source_window = nullptr;
+    std::vector<YouTubeSearchResult> items;
+    int selected = -1;
+    std::string thumbnail_url;
+    bool searching = false;
+    unsigned int search_generation = 0;
+    GCancellable* thumbnail_cancel = nullptr;
+    std::shared_ptr<bool> alive = std::make_shared<bool>(true);
+};
+
 struct FileDialogData {
     MediaControls::Impl* impl;
     GtkWidget* window;
 };
+
+static void open_search_dialog(MediaControls::Impl* impl, GtkWidget* source_window = nullptr);
 
 static void open_file_from_dialog(OpenMediaDialogData* data)
 {
@@ -149,6 +174,265 @@ static void open_file_from_dialog(OpenMediaDialogData* data)
             delete data;
         }, file_data);
     g_object_unref(dialog);
+}
+
+static std::string result_metadata(const YouTubeSearchResult& result)
+{
+    std::string metadata = result.uploader.empty() ? "YouTube" : result.uploader;
+    if (!result.duration.empty()) metadata += "  •  " + result.duration;
+    if (!result.view_count.empty()) metadata += "  •  " + result.view_count + " views";
+    return metadata;
+}
+
+static void clear_search_results(SearchDialogData* data)
+{
+    if (data->thumbnail_cancel) {
+        g_cancellable_cancel(data->thumbnail_cancel);
+        g_object_unref(data->thumbnail_cancel);
+        data->thumbnail_cancel = nullptr;
+    }
+    GtkListBox* list = GTK_LIST_BOX(data->results);
+    while (GtkListBoxRow* row = gtk_list_box_get_row_at_index(list, 0))
+        gtk_list_box_remove(list, GTK_WIDGET(row));
+    data->items.clear();
+    data->selected = -1;
+    data->thumbnail_url.clear();
+    gtk_picture_set_paintable(GTK_PICTURE(data->picture), nullptr);
+    gtk_label_set_text(GTK_LABEL(data->title), "Select a result to see its details.");
+    gtk_label_set_text(GTK_LABEL(data->metadata), "");
+    gtk_widget_set_sensitive(data->play, false);
+}
+
+struct ThumbnailData {
+    std::weak_ptr<bool> alive;
+    GtkWidget* window = nullptr;
+    std::string url;
+};
+
+static void load_thumbnail(SearchDialogData* data, const std::string& url)
+{
+    if (data->thumbnail_cancel) {
+        g_cancellable_cancel(data->thumbnail_cancel);
+        g_object_unref(data->thumbnail_cancel);
+        data->thumbnail_cancel = nullptr;
+    }
+    data->thumbnail_url = url;
+    gtk_picture_set_paintable(GTK_PICTURE(data->picture), nullptr);
+    if (url.empty()) return;
+    data->thumbnail_cancel = g_cancellable_new();
+    auto* request = new ThumbnailData{data->alive, data->window, url};
+    GFile* file = g_file_new_for_uri(url.c_str());
+    g_file_load_bytes_async(file, data->thumbnail_cancel,
+        [](GObject* source, GAsyncResult* result, gpointer raw) {
+            std::unique_ptr<ThumbnailData> request(static_cast<ThumbnailData*>(raw));
+            auto alive = request->alive.lock();
+            if (!alive || !*alive) return;
+            auto* data = static_cast<SearchDialogData*>(
+                g_object_get_data(G_OBJECT(request->window), "search-data"));
+            if (!data || data->thumbnail_url != request->url) return;
+            GError* error = nullptr;
+            GBytes* bytes = g_file_load_bytes_finish(G_FILE(source), result, nullptr, &error);
+            if (!bytes) {
+                if (error) g_error_free(error);
+                return;
+            }
+            GError* decode_error = nullptr;
+            GdkTexture* texture = gdk_texture_new_from_bytes(bytes, &decode_error);
+            if (texture) {
+                gtk_picture_set_paintable(GTK_PICTURE(data->picture), GDK_PAINTABLE(texture));
+                g_object_unref(texture);
+            }
+            if (decode_error) g_error_free(decode_error);
+            g_bytes_unref(bytes);
+        }, request);
+    g_object_unref(file);
+}
+
+static void select_search_result(SearchDialogData* data, int index)
+{
+    if (index < 0 || index >= static_cast<int>(data->items.size())) return;
+    data->selected = index;
+    const auto& result = data->items[static_cast<std::size_t>(index)];
+    gtk_label_set_text(GTK_LABEL(data->title), result.title.c_str());
+    gtk_label_set_text(GTK_LABEL(data->metadata), result_metadata(result).c_str());
+    gtk_widget_set_sensitive(data->play, true);
+    load_thumbnail(data, result.thumbnail_url);
+}
+
+static void show_search_results(SearchDialogData* data,
+                                std::vector<YouTubeSearchResult> results,
+                                const std::string& error)
+{
+    data->searching = false;
+    gtk_widget_set_sensitive(data->search, true);
+    clear_search_results(data);
+    if (!error.empty() && results.empty()) {
+        gtk_label_set_text(GTK_LABEL(data->status), error.c_str());
+        return;
+    }
+    data->items = std::move(results);
+    gtk_label_set_text(GTK_LABEL(data->status),
+                       ("Showing " + std::to_string(data->items.size()) + " results.").c_str());
+    for (const auto& result : data->items) {
+        GtkWidget* row = gtk_list_box_row_new();
+        GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        gtk_widget_set_margin_top(box, 8);
+        gtk_widget_set_margin_bottom(box, 8);
+        gtk_widget_set_margin_start(box, 10);
+        gtk_widget_set_margin_end(box, 10);
+        GtkWidget* title = gtk_label_new(result.title.c_str());
+        gtk_label_set_xalign(GTK_LABEL(title), 0.0f);
+        gtk_label_set_wrap(GTK_LABEL(title), true);
+        gtk_widget_set_hexpand(title, true);
+        gtk_box_append(GTK_BOX(box), title);
+        GtkWidget* metadata = gtk_label_new(result_metadata(result).c_str());
+        gtk_label_set_xalign(GTK_LABEL(metadata), 0.0f);
+        gtk_widget_add_css_class(metadata, "dim-label");
+        gtk_box_append(GTK_BOX(box), metadata);
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+        gtk_list_box_append(GTK_LIST_BOX(data->results), row);
+    }
+    if (!data->items.empty())
+        gtk_list_box_select_row(GTK_LIST_BOX(data->results),
+                                gtk_list_box_get_row_at_index(GTK_LIST_BOX(data->results), 0));
+}
+
+static void begin_youtube_search(SearchDialogData* data)
+{
+    const std::string query = gtk_editable_get_text(GTK_EDITABLE(data->query));
+    if (query.empty()) {
+        gtk_label_set_text(GTK_LABEL(data->status), "Enter a search term.");
+        return;
+    }
+    ++data->search_generation;
+    const unsigned int generation = data->search_generation;
+    data->searching = true;
+    gtk_widget_set_sensitive(data->search, false);
+    gtk_label_set_text(GTK_LABEL(data->status), "Searching YouTube…");
+    clear_search_results(data);
+    const std::weak_ptr<bool> alive = data->alive;
+    GtkWidget* window = data->window;
+    search_youtube_async(query, 12,
+        [alive, window, generation](std::vector<YouTubeSearchResult> results, std::string error) {
+            auto token = alive.lock();
+            if (!token || !*token) return;
+            auto* data = static_cast<SearchDialogData*>(
+                g_object_get_data(G_OBJECT(window), "search-data"));
+            if (!data || data->search_generation != generation) return;
+            show_search_results(data, std::move(results), error);
+        });
+}
+
+static void open_search_dialog(MediaControls::Impl* impl, GtkWidget* source_window)
+{
+    if (!gtk_init_check()) return;
+    GtkWidget* window = gtk_window_new();
+    GdkDisplay* display = gdk_display_get_default();
+    if (display) gtk_window_set_display(GTK_WINDOW(window), display);
+    gtk_window_set_title(GTK_WINDOW(window), "Search YouTube");
+    gtk_window_set_modal(GTK_WINDOW(window), true);
+    if (source_window)
+        gtk_window_set_transient_for(GTK_WINDOW(window), GTK_WINDOW(source_window));
+    gtk_window_set_default_size(GTK_WINDOW(window), 820, 560);
+
+    GtkWidget* root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(root, 18);
+    gtk_widget_set_margin_bottom(root, 18);
+    gtk_widget_set_margin_start(root, 18);
+    gtk_widget_set_margin_end(root, 18);
+    gtk_window_set_child(GTK_WINDOW(window), root);
+
+    GtkWidget* search_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget* query = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(query), "Search YouTube");
+    gtk_widget_set_hexpand(query, true);
+    GtkWidget* search = gtk_button_new_with_label("Search");
+    gtk_box_append(GTK_BOX(search_row), query);
+    gtk_box_append(GTK_BOX(search_row), search);
+    gtk_box_append(GTK_BOX(root), search_row);
+    GtkWidget* status = gtk_label_new("Search returns up to 12 lightweight results.");
+    gtk_label_set_xalign(GTK_LABEL(status), 0.0f);
+    gtk_box_append(GTK_BOX(root), status);
+
+    GtkWidget* content = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 14);
+    gtk_widget_set_vexpand(content, true);
+    gtk_box_append(GTK_BOX(root), content);
+    GtkWidget* scrolled = gtk_scrolled_window_new();
+    gtk_widget_set_size_request(scrolled, 390, -1);
+    gtk_widget_set_vexpand(scrolled, true);
+    GtkWidget* results = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(results), GTK_SELECTION_SINGLE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), results);
+    gtk_box_append(GTK_BOX(content), scrolled);
+
+    GtkWidget* details = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_hexpand(details, true);
+    gtk_widget_set_vexpand(details, true);
+    GtkWidget* picture = gtk_picture_new();
+    gtk_widget_set_size_request(picture, 360, 203);
+    gtk_widget_set_vexpand(picture, true);
+    gtk_picture_set_can_shrink(GTK_PICTURE(picture), true);
+    gtk_box_append(GTK_BOX(details), picture);
+    GtkWidget* title = gtk_label_new("Select a result to see its details.");
+    gtk_label_set_xalign(GTK_LABEL(title), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(title), true);
+    gtk_box_append(GTK_BOX(details), title);
+    GtkWidget* metadata = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(metadata), 0.0f);
+    gtk_widget_add_css_class(metadata, "dim-label");
+    gtk_box_append(GTK_BOX(details), metadata);
+    gtk_widget_set_vexpand(metadata, true);
+    GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget* cancel = gtk_button_new_with_label("Cancel");
+    GtkWidget* play = gtk_button_new_with_label("Play");
+    gtk_widget_set_sensitive(play, false);
+    gtk_box_append(GTK_BOX(buttons), cancel);
+    gtk_box_append(GTK_BOX(buttons), play);
+    gtk_box_append(GTK_BOX(details), buttons);
+    gtk_box_append(GTK_BOX(content), details);
+
+    auto* data = new SearchDialogData;
+    data->impl = impl;
+    data->window = window;
+    data->query = query;
+    data->search = search;
+    data->status = status;
+    data->results = results;
+    data->picture = picture;
+    data->title = title;
+    data->metadata = metadata;
+    data->play = play;
+    data->source_window = source_window ? GTK_WIDGET(g_object_ref(source_window)) : nullptr;
+    g_object_set_data(G_OBJECT(window), "search-data", data);
+    g_signal_connect(search, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        begin_youtube_search(static_cast<SearchDialogData*>(raw));
+    }), data);
+    g_signal_connect(query, "activate", G_CALLBACK(+[](GtkEntry*, gpointer raw) {
+        begin_youtube_search(static_cast<SearchDialogData*>(raw));
+    }), data);
+    g_signal_connect(results, "row-selected", G_CALLBACK(+[](GtkListBox*, GtkListBoxRow* row,
+                                                               gpointer raw) {
+        if (row) select_search_result(static_cast<SearchDialogData*>(raw),
+                                      gtk_list_box_row_get_index(row));
+    }), data);
+    g_signal_connect(play, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        auto* data = static_cast<SearchDialogData*>(raw);
+        if (data->selected < 0 || data->selected >= static_cast<int>(data->items.size())) return;
+        data->impl->open(data->items[static_cast<std::size_t>(data->selected)].webpage_url);
+        if (data->source_window) gtk_window_destroy(GTK_WINDOW(data->source_window));
+        gtk_window_destroy(GTK_WINDOW(data->window));
+    }), data);
+    g_signal_connect(cancel, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        gtk_window_destroy(GTK_WINDOW(static_cast<SearchDialogData*>(raw)->window));
+    }), data);
+    g_signal_connect(window, "destroy", G_CALLBACK(+[](GtkWidget*, gpointer raw) {
+        auto* data = static_cast<SearchDialogData*>(raw);
+        *data->alive = false;
+        if (data->thumbnail_cancel) g_object_unref(data->thumbnail_cancel);
+        if (data->source_window) g_object_unref(data->source_window);
+        delete data;
+    }), data);
+    gtk_window_present(GTK_WINDOW(window));
 }
 
 static void open_dialog(MediaControls::Impl* impl)
@@ -174,15 +458,21 @@ static void open_dialog(MediaControls::Impl* impl)
     auto* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(root), buttons);
     auto* browse = gtk_button_new_with_label("Browse Files");
+    auto* search = gtk_button_new_with_label("Search YouTube");
     auto* cancel = gtk_button_new_with_label("Cancel");
     auto* open = gtk_button_new_with_label("Open URL");
     gtk_box_append(GTK_BOX(buttons), browse);
+    gtk_box_append(GTK_BOX(buttons), search);
     gtk_box_append(GTK_BOX(buttons), cancel);
     gtk_box_append(GTK_BOX(buttons), open);
 
     auto* data = new OpenMediaDialogData{impl, window, url, status};
     g_signal_connect(browse, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
         open_file_from_dialog(static_cast<OpenMediaDialogData*>(raw));
+    }), data);
+    g_signal_connect(search, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        auto* data = static_cast<OpenMediaDialogData*>(raw);
+        open_search_dialog(data->impl, data->window);
     }), data);
     g_signal_connect(cancel, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
         gtk_window_destroy(GTK_WINDOW(static_cast<OpenMediaDialogData*>(raw)->window));

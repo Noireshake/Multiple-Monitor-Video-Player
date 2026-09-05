@@ -30,6 +30,7 @@ endif()
 add_executable(vlc_spanning
     src/main.cpp
     src/media_controls.cpp
+    src/youtube_search.cpp
 )
 
 target_link_libraries(vlc_spanning
