@@ -22,7 +22,7 @@ VLC Spanning Player is a LibVLC 3.x video player that renders one video into one
 - `resources/com.noirshake.VLCSpanning.svg`: original application icon
 - `CMakeLists.txt`: CMake, pkg-config dependencies, install rules, CPack DEB configuration
 - `run.sh`: development launcher; accepts an optional video path or starts the welcome path
-- `vlc-spanning_1.3_amd64.deb`: preserved latest Debian artifact; regenerate after source changes
+- `vlc-spanning_1.6_amd64.deb`: latest Debian artifact; regenerate after source changes
 
 ## Non-Negotiable Architecture
 
@@ -72,6 +72,6 @@ cmake --build build -j$(nproc)
 cmake --build build --target package
 ```
 
-The package is generated as `build/vlc-spanning_1.3_amd64.deb` unless the project version changes. Validate with `dpkg-deb --info`, `dpkg-deb --contents`, `desktop-file-validate`, and editor diagnostics. Install using `sudo apt install ./build/vlc-spanning_1.3_amd64.deb` or copy it to `/tmp` first to avoid the `_apt` home-directory sandbox notice.
+The package is generated as `build/vlc-spanning_1.6_amd64.deb` for this release. Validate with `dpkg-deb --info`, `dpkg-deb --contents`, `desktop-file-validate`, and editor diagnostics. Install using `sudo apt install ./build/vlc-spanning_1.6_amd64.deb` or copy it to `/tmp` first to avoid the `_apt` home-directory sandbox notice.
 
 Do not delete or overwrite unrelated user changes. Do not commit, create ZIP files, or create duplicate projects. Report which physical GNOME/two-monitor tests were not possible in the current environment.

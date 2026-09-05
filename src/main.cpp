@@ -116,17 +116,24 @@ static std::string shell_quote(const std::string& value)
 
 static const char* quality_format(VideoQuality quality)
 {
+    const char* height = "";
     switch (quality) {
-    case VideoQuality::P2160: return "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best";
-    case VideoQuality::P1440: return "bestvideo[height<=1440]+bestaudio/best[height<=1440]/best";
-    case VideoQuality::P1080: return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best";
-    case VideoQuality::P720: return "bestvideo[height<=720]+bestaudio/best[height<=720]/best";
-    case VideoQuality::P480: return "bestvideo[height<=480]+bestaudio/best[height<=480]/best";
-    case VideoQuality::P360: return "bestvideo[height<=360]+bestaudio/best[height<=360]/best";
-    case VideoQuality::P240: return "bestvideo[height<=240]+bestaudio/best[height<=240]/best";
-    case VideoQuality::Auto: return "bestvideo*+bestaudio/best";
+    case VideoQuality::P2160: height = "[height<=2160]"; break;
+    case VideoQuality::P1440: height = "[height<=1440]"; break;
+    case VideoQuality::P1080: height = "[height<=1080]"; break;
+    case VideoQuality::P720: height = "[height<=720]"; break;
+    case VideoQuality::P480: height = "[height<=480]"; break;
+    case VideoQuality::P360: height = "[height<=360]"; break;
+    case VideoQuality::P240: height = "[height<=240]"; break;
+    case VideoQuality::Auto: break;
     }
-    return "bestvideo*+bestaudio/best";
+    // Prefer H.264/MP4 because it avoids VP9 decoder buffer deadlocks on some
+    // X11 software-rendering setups, while retaining a compatible fallback.
+    static std::string format;
+    format = "bestvideo" + std::string(height) +
+             "[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best" +
+             std::string(height) + "[ext=mp4]/best";
+    return format.c_str();
 }
 
 struct ResolvedMedia {

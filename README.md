@@ -133,7 +133,7 @@ to the existing single LibVLC player.
 
     sudo cmake --install build
 
-The latest preserved package artifact is `vlc-spanning_1.4_amd64.deb` in the
+The latest package artifact is `vlc-spanning_1.6_amd64.deb` in the
 project root. The source is under `src/` and application resources are under
 `resources/`.
 
