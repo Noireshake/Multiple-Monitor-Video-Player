@@ -168,7 +168,9 @@ static bool resolve_youtube_location(const std::string& source, VideoQuality qua
     }
     const int status = pclose(stream);
     if (status != 0 || video_location.empty()) {
-        std::cerr << "yt-dlp could not extract a playable stream URL. Update it with: "
+        std::cerr << "yt-dlp could not extract a playable stream URL. "
+                  << "The video may be unavailable, private, region-restricted, or require "
+                  << "an updated extractor. Check the yt-dlp error above; if needed, update it with: "
                   << "sudo apt install --only-upgrade yt-dlp\n";
         return false;
     }
