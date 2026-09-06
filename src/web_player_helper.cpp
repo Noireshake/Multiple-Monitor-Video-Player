@@ -1,7 +1,8 @@
 #include <gtk/gtk.h>
-#include <gtk/gtkx.h>
 #include <webkit2/webkit2.h>
+#include <gdk/gdkx.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 
 #include <cstdlib>
 #include <iostream>
@@ -104,11 +105,15 @@ int main(int argc, char* argv[])
         return 3;
     }
     HelperState state;
-    state.window = gtk_plug_new(parent);
+    state.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_decorated(GTK_WINDOW(state.window), FALSE);
     gtk_window_set_resizable(GTK_WINDOW(state.window), TRUE);
+    gtk_window_set_skip_taskbar_hint(GTK_WINDOW(state.window), TRUE);
+    gtk_window_set_skip_pager_hint(GTK_WINDOW(state.window), TRUE);
     gtk_window_set_title(GTK_WINDOW(state.window), "VLC Spanning Player Web");
     gtk_window_set_default_size(GTK_WINDOW(state.window), static_cast<int>(width),
                                 static_cast<int>(height));
+    gtk_window_move(GTK_WINDOW(state.window), x, y);
     state.web_view = WEBKIT_WEB_VIEW(webkit_web_view_new());
     WebKitSettings* settings = webkit_web_view_get_settings(state.web_view);
     webkit_settings_set_enable_javascript(settings, TRUE);
@@ -129,12 +134,18 @@ int main(int argc, char* argv[])
     gtk_widget_set_hexpand(GTK_WIDGET(state.web_view), TRUE);
     gtk_widget_set_vexpand(GTK_WIDGET(state.web_view), TRUE);
     gtk_widget_realize(state.window);
-    if (!gtk_widget_get_window(state.window)) {
-        std::cerr << "[WEB] could not create the embedded X11 surface.\n";
+    GdkWindow* window = gtk_widget_get_window(state.window);
+    if (!window) return 4;
+    GdkWindow* parent_window = gdk_x11_window_foreign_new_for_display(
+        gdk_window_get_display(window), parent);
+    if (!parent_window) {
+        std::cerr << "[WEB] could not access SDL X11 parent window.\n";
         return 4;
     }
-    gtk_window_resize(GTK_WINDOW(state.window), static_cast<int>(width),
-                      static_cast<int>(height));
+    gdk_window_reparent(window, parent_window, 0, 0);
+    g_object_unref(parent_window);
+    gdk_window_set_override_redirect(window, TRUE);
+    gdk_window_resize(window, width, height);
     gtk_widget_show_all(state.window);
     webkit_web_view_load_uri(state.web_view, url.c_str());
     std::cout << "[WEB] helper ready\n" << std::flush;
