@@ -559,16 +559,6 @@ int main(int argc, char* argv[])
         }
         toggle_fullscreen(window, display, xwindow, display_count - 1, state);
         if (!entering && media) configure_video(player, settings);
-        if (web_active) {
-            int web_x = 0;
-            int web_y = 0;
-            int web_width = 0;
-            int web_height = 0;
-            SDL_GetWindowPosition(window, &web_x, &web_y);
-            SDL_GetWindowSize(window, &web_width, &web_height);
-            web_player.resize(web_x, web_y, static_cast<unsigned int>(std::max(1, web_width)),
-                              static_cast<unsigned int>(std::max(1, web_height)));
-        }
     };
     MediaControls controls(display, xwindow, load_media, toggle_play,
                            toggle_player_fullscreen,
@@ -596,7 +586,7 @@ int main(int argc, char* argv[])
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
             else if (event.type == SDL_MOUSEMOTION) controls.mouse_activity();
-            else if (event.type == SDL_WINDOWEVENT &&
+            else if (event.type == SDL_WINDOWEVENT && !state.fullscreen &&
                      (event.window.event == SDL_WINDOWEVENT_MOVED ||
                       event.window.event == SDL_WINDOWEVENT_RESIZED ||
                       event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)) {
