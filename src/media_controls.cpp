@@ -24,6 +24,7 @@ struct MediaControls::Impl {
     SeekCallback seek;
     VolumeCallback volume;
     VoidCallback settings;
+    WebCallback web;
     bool visible = false;
     bool dragging = false;
     bool timeline_dragging = false;
@@ -43,6 +44,13 @@ struct MediaControls::Impl {
     unsigned int height = 58;
     guint hide_source = 0;
     bool settings_open = false;
+};
+
+struct OpenWebDialogData {
+    MediaControls::Impl* impl;
+    GtkWidget* window;
+    GtkWidget* url;
+    GtkWidget* status;
 };
 
 static std::string time_text(long long milliseconds)
@@ -74,6 +82,7 @@ static void draw(MediaControls::Impl* impl)
     XDrawString(impl->display, impl->overlay, gc, 112, 24, "-5", 2);
     XDrawString(impl->display, impl->overlay, gc, 145, 24, "+5", 2);
     XDrawString(impl->display, impl->overlay, gc, 210, 24, "Settings", 8);
+    XDrawString(impl->display, impl->overlay, gc, 270, 24, "Web", 3);
     const std::string time = time_text(impl->duration < 0 ? -1 : static_cast<long long>(impl->position * impl->duration))
         + " / " + time_text(impl->duration);
     XDrawString(impl->display, impl->overlay, gc, 330, 24, time.c_str(), static_cast<int>(time.size()));
@@ -152,6 +161,55 @@ struct FileDialogData {
 };
 
 static void open_search_dialog(MediaControls::Impl* impl, GtkWidget* source_window = nullptr);
+
+static void open_web_dialog(MediaControls::Impl* impl)
+{
+    if (!gtk_init_check()) return;
+    auto* window = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(window), "Open Web");
+    gtk_window_set_modal(GTK_WINDOW(window), true);
+    gtk_window_set_default_size(GTK_WINDOW(window), 520, 170);
+    auto* root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(root, 18);
+    gtk_widget_set_margin_bottom(root, 18);
+    gtk_widget_set_margin_start(root, 18);
+    gtk_widget_set_margin_end(root, 18);
+    gtk_window_set_child(GTK_WINDOW(window), root);
+    gtk_box_append(GTK_BOX(root), gtk_label_new("Open a secure HTTPS URL in the built-in browser"));
+    auto* url = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(url), "https://example.com");
+    gtk_box_append(GTK_BOX(root), url);
+    auto* status = gtk_label_new("");
+    gtk_box_append(GTK_BOX(root), status);
+    auto* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(root), buttons);
+    auto* cancel = gtk_button_new_with_label("Cancel");
+    auto* open = gtk_button_new_with_label("Open Web");
+    gtk_box_append(GTK_BOX(buttons), cancel);
+    gtk_box_append(GTK_BOX(buttons), open);
+    auto* data = new OpenWebDialogData{impl, window, url, status};
+    g_signal_connect(cancel, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        gtk_window_destroy(GTK_WINDOW(static_cast<OpenWebDialogData*>(raw)->window));
+    }), data);
+    g_signal_connect(open, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        auto* data = static_cast<OpenWebDialogData*>(raw);
+        const std::string value = gtk_editable_get_text(GTK_EDITABLE(data->url));
+        if (value.rfind("https://", 0) != 0 || value.size() <= 8 ||
+            value.find_first_of(" \t\r\n") != std::string::npos) {
+            gtk_label_set_text(GTK_LABEL(data->status), "Enter a valid HTTPS URL.");
+            return;
+        }
+        if (!data->impl->web || !data->impl->web(value)) {
+            gtk_label_set_text(GTK_LABEL(data->status), "WebKit support is unavailable in this build.");
+            return;
+        }
+        gtk_window_destroy(GTK_WINDOW(data->window));
+    }), data);
+    g_signal_connect(window, "destroy", G_CALLBACK(+[](GtkWidget*, gpointer raw) {
+        delete static_cast<OpenWebDialogData*>(raw);
+    }), data);
+    gtk_window_present(GTK_WINDOW(window));
+}
 
 static void open_file_from_dialog(OpenMediaDialogData* data)
 {
@@ -461,10 +519,12 @@ static void open_dialog(MediaControls::Impl* impl)
     auto* search = gtk_button_new_with_label("Search YouTube");
     auto* cancel = gtk_button_new_with_label("Cancel");
     auto* open = gtk_button_new_with_label("Open URL");
+    auto* web = gtk_button_new_with_label("Open in Web");
     gtk_box_append(GTK_BOX(buttons), browse);
     gtk_box_append(GTK_BOX(buttons), search);
     gtk_box_append(GTK_BOX(buttons), cancel);
     gtk_box_append(GTK_BOX(buttons), open);
+    gtk_box_append(GTK_BOX(buttons), web);
 
     auto* data = new OpenMediaDialogData{impl, window, url, status};
     g_signal_connect(browse, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
@@ -487,6 +547,20 @@ static void open_dialog(MediaControls::Impl* impl)
         data->impl->open(value);
         gtk_window_destroy(GTK_WINDOW(data->window));
     }), data);
+    g_signal_connect(web, "clicked", G_CALLBACK(+[](GtkButton*, gpointer raw) {
+        auto* data = static_cast<OpenMediaDialogData*>(raw);
+        const std::string value = gtk_editable_get_text(GTK_EDITABLE(data->url));
+        if (value.rfind("https://", 0) != 0 || value.size() <= 8 ||
+            value.find_first_of(" \t\r\n") != std::string::npos) {
+            gtk_label_set_text(GTK_LABEL(data->status), "Enter a valid HTTPS URL for web playback.");
+            return;
+        }
+        if (!data->impl->web || !data->impl->web(value)) {
+            gtk_label_set_text(GTK_LABEL(data->status), "WebKit support is unavailable in this build.");
+            return;
+        }
+        gtk_window_destroy(GTK_WINDOW(data->window));
+    }), data);
     g_signal_connect(window, "destroy", G_CALLBACK(+[](GtkWidget*, gpointer raw) {
         delete static_cast<OpenMediaDialogData*>(raw);
     }), data);
@@ -495,14 +569,14 @@ static void open_dialog(MediaControls::Impl* impl)
 
 MediaControls::MediaControls(Display* display, Window parent, OpenCallback open, VoidCallback play_pause,
                              VoidCallback fullscreen, VoidCallback mute, SeekCallback seek,
-                             VolumeCallback volume, VoidCallback settings) : impl_(new Impl{})
+                             VolumeCallback volume, VoidCallback settings, WebCallback web) : impl_(new Impl{})
 {
     impl_->display = display;
     impl_->parent = parent;
     impl_->open = std::move(open); impl_->play_pause = std::move(play_pause);
     impl_->fullscreen = std::move(fullscreen); impl_->mute = std::move(mute);
     impl_->seek = std::move(seek); impl_->volume = std::move(volume);
-    impl_->settings = std::move(settings);
+    impl_->settings = std::move(settings); impl_->web = std::move(web);
     gtk_init_check();
     impl_->overlay = XCreateSimpleWindow(impl_->display, parent, 0, 0, impl_->width, impl_->height,
                                          0, BlackPixel(impl_->display, DefaultScreen(impl_->display)),
@@ -582,7 +656,7 @@ void MediaControls::pump_events()
             std::cout << "Media bar click x=" << event.xbutton.x
                       << " y=" << event.xbutton.y << std::endl;
             if (event.xbutton.y < 34 && event.xbutton.x >= 190 &&
-                event.xbutton.x < 320) {
+                event.xbutton.x < 270) {
                 std::cout << "Opening player settings" << std::endl;
                 if (impl_->settings) impl_->settings();
                 else std::cerr << "Player settings callback is not connected.\n";
@@ -591,6 +665,8 @@ void MediaControls::pump_events()
             else if (event.xbutton.y < 34 && event.xbutton.x >= 45 && event.xbutton.x < 105) open_dialog(impl_);
             else if (event.xbutton.y < 34 && event.xbutton.x >= 105 && event.xbutton.x < 190 && impl_->seek)
                 impl_->seek(event.xbutton.x < 145 ? -0.05f : 0.05f);
+            else if (event.xbutton.y < 34 && event.xbutton.x >= 270 && event.xbutton.x < 320 && impl_->web)
+                open_web_dialog(impl_);
             else if (event.xbutton.y < 34 && event.xbutton.x >= static_cast<int>(impl_->width) - 150 &&
                      event.xbutton.x < static_cast<int>(impl_->width) - 90 && impl_->mute) impl_->mute();
             else if (event.xbutton.y < 34 && event.xbutton.x >= static_cast<int>(impl_->width) - 90 && impl_->fullscreen) impl_->fullscreen();
@@ -778,6 +854,11 @@ void MediaControls::show_settings_dialog(const PlayerSettings& settings,
 void MediaControls::set_settings_callback(VoidCallback settings)
 {
     impl_->settings = std::move(settings);
+}
+
+void MediaControls::set_web_callback(WebCallback web)
+{
+    impl_->web = std::move(web);
 }
 
 bool MediaControls::is_visible() const { return impl_->visible; }

@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "media_controls.hpp"
+#include "web_player.hpp"
 struct WindowState { bool fullscreen = false; int x = 0; int y = 0; int width = 0; int height = 0; };
 
 static void print_help(const char* program)
@@ -456,6 +457,37 @@ int main(int argc, char* argv[])
     SDL_GetWindowPosition(window, &state.x, &state.y);
     SDL_GetWindowSize(window, &state.width, &state.height);
     MediaControls* controls_ptr = nullptr;
+    WebPlayer web_player(display, xwindow);
+    bool web_active = false;
+    auto stop_media = [&] {
+        if (media) {
+            libvlc_media_player_stop(player);
+            libvlc_media_release(media);
+            media = nullptr;
+        }
+        current_video.clear();
+    };
+    auto open_web = [&](const std::string& url) {
+        int web_x = 0;
+        int web_y = 0;
+        int web_width = 0;
+        int web_height = 0;
+        SDL_GetWindowPosition(window, &web_x, &web_y);
+        SDL_GetWindowSize(window, &web_width, &web_height);
+        if (!web_player.open(url, web_x, web_y, static_cast<unsigned int>(std::max(1, web_width)),
+                             static_cast<unsigned int>(std::max(1, web_height)))) {
+            std::cerr << "[WEB] could not open URL in the built-in browser.\n";
+            return false;
+        }
+        stop_media();
+        web_active = true;
+        SDL_ShowWindow(window);
+        SDL_SetWindowTitle(window, "VLC Spanning Player - Web");
+        if (controls_ptr) controls_ptr->hide();
+        web_player.resize(web_x, web_y, static_cast<unsigned int>(std::max(1, web_width)),
+                          static_cast<unsigned int>(std::max(1, web_height)));
+        return true;
+    };
     auto load_media = [&](const std::string& path) {
         if (!is_network_location(path)) {
             std::error_code file_error;
@@ -463,6 +495,10 @@ int main(int argc, char* argv[])
                 std::cerr << "Video file does not exist or is not a regular file: " << path << '\n';
                 return;
             }
+        }
+        if (web_active || web_player.active()) {
+            web_player.hide();
+            web_active = false;
         }
         ResolvedMedia resolved_media;
         if (!resolve_youtube_location(path, settings.quality, resolved_media)) return;
@@ -508,6 +544,8 @@ int main(int argc, char* argv[])
         SDL_SetWindowSize(window, selected_span.w, selected_span.h);
         state.x = selected_span.x; state.y = selected_span.y;
         state.width = selected_span.w; state.height = selected_span.h;
+        if (web_active) web_player.resize(state.x, state.y, static_cast<unsigned int>(state.width),
+                                          static_cast<unsigned int>(state.height));
         if (!current_video.empty()) {
             load_media(current_video);
             libvlc_media_player_set_position(player, position);
@@ -525,7 +563,7 @@ int main(int argc, char* argv[])
     MediaControls controls(display, xwindow, load_media, toggle_play,
                            toggle_player_fullscreen,
                            [&] { libvlc_audio_toggle_mute(player); },
-                           seek, set_volume, {});
+                           seek, set_volume, {}, open_web);
     controls.update_position(state.x, state.y,
                              static_cast<unsigned int>(state.width),
                              static_cast<unsigned int>(state.height));
@@ -540,6 +578,11 @@ int main(int argc, char* argv[])
     bool running = true; SDL_Event event{};
     while (running) {
         controls.pump_events();
+        web_player.pump_events();
+        if (web_active && !web_player.active()) {
+            web_active = false;
+            SDL_SetWindowTitle(window, "VLC Spanning Player");
+        }
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
             else if (event.type == SDL_MOUSEMOTION) controls.mouse_activity();
@@ -549,6 +592,9 @@ int main(int argc, char* argv[])
                       event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)) {
                 SDL_GetWindowPosition(window, &state.x, &state.y);
                 SDL_GetWindowSize(window, &state.width, &state.height);
+                if (web_active)
+                    web_player.resize(state.x, state.y, static_cast<unsigned int>(state.width),
+                                      static_cast<unsigned int>(state.height));
             }
             else if (event.type == SDL_KEYDOWN && event.key.repeat == 0) {
                 switch (event.key.keysym.sym) {
@@ -593,6 +639,7 @@ int main(int argc, char* argv[])
                      media ? libvlc_media_player_get_position(player) : 0.0f, duration);
         SDL_Delay(50);
     }
+    web_player.hide();
     libvlc_media_player_stop(player);
     libvlc_media_player_release(player);
     if (media) libvlc_media_release(media);
