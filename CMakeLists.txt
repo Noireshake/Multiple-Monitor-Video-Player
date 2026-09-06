@@ -15,8 +15,6 @@ find_package(X11 REQUIRED)
 pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
 pkg_check_modules(LIBVLC REQUIRED IMPORTED_TARGET libvlc)
 pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
-pkg_check_modules(GTK3 QUIET IMPORTED_TARGET gtk+-3.0)
-pkg_check_modules(WEBKITGTK QUIET IMPORTED_TARGET webkit2gtk-4.1)
 
 list(GET LIBVLC_LIBRARY_DIRS 0 LIBVLC_LIBRARY_DIR)
 set(LIBVLC_PLUGIN_DIR "${LIBVLC_LIBRARY_DIR}/vlc")
@@ -33,7 +31,6 @@ add_executable(vlc_spanning
     src/main.cpp
     src/media_controls.cpp
     src/youtube_search.cpp
-    src/web_player.cpp
 )
 
 target_link_libraries(vlc_spanning
@@ -43,16 +40,6 @@ target_link_libraries(vlc_spanning
         PkgConfig::GTK4
         X11::X11
 )
-
-if(GTK3_FOUND AND WEBKITGTK_FOUND)
-    add_executable(vlc_web_player src/web_player_helper.cpp)
-    target_link_libraries(vlc_web_player PRIVATE PkgConfig::GTK3 PkgConfig::WEBKITGTK)
-    target_compile_options(vlc_web_player PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_definitions(vlc_spanning PRIVATE VLC_SPANNING_HAS_WEBPLAYER=1)
-    message(STATUS "WebKitGTK web player helper enabled")
-else()
-    message(STATUS "WebKitGTK web player helper disabled (GTK3/WebKitGTK not found)")
-endif()
 
 target_compile_options(vlc_spanning
     PRIVATE
@@ -69,12 +56,6 @@ set_target_properties(vlc_spanning PROPERTIES
 install(TARGETS vlc_spanning
     RUNTIME DESTINATION bin
 )
-
-if(TARGET vlc_web_player)
-    install(TARGETS vlc_web_player
-        RUNTIME DESTINATION bin
-    )
-endif()
 
 # Bundle LibVLC so the installed app does not require the VLC package.
 install(FILES ${LIBVLC_RUNTIME_LIBS}
@@ -111,10 +92,6 @@ set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Noirshake")
 set(CPACK_DEBIAN_PACKAGE_SECTION "video")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "yt-dlp, libsdl2-2.0-0, libgtk-4-1, libx11-6")
-if(TARGET vlc_web_player)
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS
-        "${CPACK_DEBIAN_PACKAGE_DEPENDS}, libgtk-3-0, libwebkit2gtk-4.1-0")
-endif()
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 

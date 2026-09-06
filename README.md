@@ -34,9 +34,6 @@ If Xwayland is not available, use an Xorg session.
 - Open > Search YouTube: search a bounded list of results, inspect the selected
   thumbnail and metadata, and press Play to load it. Searching never starts
   playback or creates a second LibVLC player.
-- Web: open a secure HTTPS URL in the normal WebKit browser. Web playback uses
-  the optional GTK3/WebKitGTK companion window over the SDL X11 canvas; it does
-  not extract media, bypass DRM, or bypass authentication.
 
 ## Display modes
 
@@ -76,9 +73,7 @@ For Ubuntu 24.04:
         libvlccore-dev \
         yt-dlp \
         libx11-dev \
-        libgtk-4-dev \
-        libgtk-3-dev \
-        libwebkit2gtk-4.1-dev
+        libgtk-4-dev
 
 Ubuntu's package repository provides libvlc-dev. Do not try to use
 `find_package(VLC REQUIRED)` unless you have installed a separate CMake
@@ -98,10 +93,6 @@ Check the executable:
 
 The program itself uses positional video input or an HTTP(S) URL, so --help is
 expected to print the usage line and exit.
-
-GTK3 and WebKitGTK are optional. If either package is unavailable, CMake still
-builds the native LibVLC player and reports that the WebKit companion is
-disabled.
 
 ## Run
 
@@ -136,8 +127,7 @@ an HTTP(S)/YouTube URL. The same dialog also provides Search YouTube. Search
 results are limited to 12 lightweight `yt-dlp` entries and thumbnails are
 loaded only for the selected result, so searching does not retain a large
 playlist or download video data. Press Play to pass the selected YouTube URL
-to the existing single LibVLC player. The media bar's Web control opens the
-dedicated HTTPS-only WebKit browser workflow.
+to the existing single LibVLC player.
 
 ## Install the desktop application
 

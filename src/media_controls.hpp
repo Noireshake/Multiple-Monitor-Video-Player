@@ -38,11 +38,10 @@ public:
     using SeekCallback = std::function<void(float)>;
     using VolumeCallback = std::function<void(int)>;
     using SettingsCallback = std::function<void(const PlayerSettings&)>;
-    using WebCallback = std::function<bool(const std::string&)>;
 
     MediaControls(Display* display, Window parent, OpenCallback open, VoidCallback play_pause,
                   VoidCallback fullscreen, VoidCallback mute, SeekCallback seek,
-                  VolumeCallback volume, VoidCallback settings, WebCallback web);
+                  VolumeCallback volume, VoidCallback settings);
     ~MediaControls();
 
     MediaControls(const MediaControls&) = delete;
@@ -62,7 +61,6 @@ public:
                               const std::vector<DisplayGeometry>& displays,
                               SettingsCallback apply);
     void set_settings_callback(VoidCallback settings);
-    void set_web_callback(WebCallback web);
 
 private:
     Impl* impl_;
