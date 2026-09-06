@@ -82,13 +82,16 @@ int main(int argc, char* argv[])
 {
     Window parent = 0;
     std::string url;
+    int x = 0;
+    int y = 0;
     unsigned int width = 1;
     unsigned int height = 1;
     for (int index = 1; index + 1 < argc; ++index) {
         const std::string option = argv[index];
         if (option == "--parent") parent = static_cast<Window>(std::strtoull(argv[++index], nullptr, 10));
         else if (option == "--url") url = argv[++index];
-        else if (option == "--x" || option == "--y") ++index;
+        else if (option == "--x") x = std::atoi(argv[++index]);
+        else if (option == "--y") y = std::atoi(argv[++index]);
         else if (option == "--width") width = static_cast<unsigned int>(std::strtoul(argv[++index], nullptr, 10));
         else if (option == "--height") height = static_cast<unsigned int>(std::strtoul(argv[++index], nullptr, 10));
     }
