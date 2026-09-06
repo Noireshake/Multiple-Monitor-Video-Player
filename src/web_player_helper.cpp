@@ -2,6 +2,7 @@
 #include <webkit2/webkit2.h>
 #include <gdk/gdkx.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 
 #include <cstdlib>
 #include <iostream>
@@ -13,6 +14,29 @@ struct HelperState {
     WebKitWebView* web_view = nullptr;
     GIOChannel* input = nullptr;
 };
+
+static gboolean keep_embedded_fullscreen(WebKitWebView*, gpointer)
+{
+    std::cout << "[WEB] page fullscreen request kept inside the application window\n";
+    return TRUE;
+}
+
+static void report_load_changed(WebKitWebView* view, WebKitLoadEvent event, gpointer)
+{
+    if (event == WEBKIT_LOAD_STARTED)
+        std::cout << "[WEB] load started: " << webkit_web_view_get_uri(view) << '\n';
+    else if (event == WEBKIT_LOAD_FINISHED)
+        std::cout << "[WEB] load finished: " << webkit_web_view_get_uri(view) << '\n';
+}
+
+static gboolean report_load_failed(WebKitWebView*, WebKitLoadEvent,
+                                   const gchar* failing_uri, GError* error, gpointer)
+{
+    std::cerr << "[WEB] load failed for " << (failing_uri ? failing_uri : "(unknown)");
+    if (error) std::cerr << ": " << error->message;
+    std::cerr << '\n';
+    return FALSE;
+}
 
 static bool valid_https_url(const std::string& value)
 {
@@ -84,13 +108,29 @@ int main(int argc, char* argv[])
     state.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_decorated(GTK_WINDOW(state.window), FALSE);
     gtk_window_set_resizable(GTK_WINDOW(state.window), TRUE);
+    gtk_window_set_skip_taskbar_hint(GTK_WINDOW(state.window), TRUE);
+    gtk_window_set_skip_pager_hint(GTK_WINDOW(state.window), TRUE);
     gtk_window_set_title(GTK_WINDOW(state.window), "VLC Spanning Player Web");
     gtk_window_set_default_size(GTK_WINDOW(state.window), static_cast<int>(width),
                                 static_cast<int>(height));
     gtk_window_move(GTK_WINDOW(state.window), x, y);
     state.web_view = WEBKIT_WEB_VIEW(webkit_web_view_new());
+    WebKitSettings* settings = webkit_web_view_get_settings(state.web_view);
+    webkit_settings_set_enable_javascript(settings, TRUE);
+    webkit_settings_set_media_playback_requires_user_gesture(settings, FALSE);
+    g_signal_connect(state.web_view, "enter-fullscreen",
+                     G_CALLBACK(keep_embedded_fullscreen), nullptr);
+    g_signal_connect(state.web_view, "leave-fullscreen",
+                     G_CALLBACK(+[](WebKitWebView*, gpointer) {
+                         std::cout << "[WEB] page fullscreen request ended\n";
+                         return TRUE;
+                     }), nullptr);
+    g_signal_connect(state.web_view, "load-changed",
+                     G_CALLBACK(report_load_changed), nullptr);
+    g_signal_connect(state.web_view, "load-failed",
+                     G_CALLBACK(report_load_failed), nullptr);
     gtk_container_add(GTK_CONTAINER(state.window), GTK_WIDGET(state.web_view));
-    gtk_widget_show_all(state.window);
+    gtk_widget_realize(state.window);
     GdkWindow* window = gtk_widget_get_window(state.window);
     if (!window) return 4;
     GdkWindow* parent_window = gdk_x11_window_foreign_new_for_display(
@@ -101,7 +141,9 @@ int main(int argc, char* argv[])
     }
     gdk_window_reparent(window, parent_window, 0, 0);
     g_object_unref(parent_window);
+    gdk_window_set_override_redirect(window, TRUE);
     gdk_window_resize(window, width, height);
+    gtk_widget_show_all(state.window);
     webkit_web_view_load_uri(state.web_view, url.c_str());
     std::cout << "[WEB] helper ready\n" << std::flush;
 
