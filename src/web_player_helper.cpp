@@ -118,6 +118,7 @@ int main(int argc, char* argv[])
     WebKitSettings* settings = webkit_web_view_get_settings(state.web_view);
     webkit_settings_set_enable_javascript(settings, TRUE);
     webkit_settings_set_media_playback_requires_user_gesture(settings, FALSE);
+    webkit_settings_set_enable_fullscreen(settings, FALSE);
     g_signal_connect(state.web_view, "enter-fullscreen",
                      G_CALLBACK(keep_embedded_fullscreen), nullptr);
     g_signal_connect(state.web_view, "leave-fullscreen",
@@ -130,6 +131,8 @@ int main(int argc, char* argv[])
     g_signal_connect(state.web_view, "load-failed",
                      G_CALLBACK(report_load_failed), nullptr);
     gtk_container_add(GTK_CONTAINER(state.window), GTK_WIDGET(state.web_view));
+    gtk_widget_set_hexpand(GTK_WIDGET(state.web_view), TRUE);
+    gtk_widget_set_vexpand(GTK_WIDGET(state.web_view), TRUE);
     gtk_widget_realize(state.window);
     GdkWindow* window = gtk_widget_get_window(state.window);
     if (!window) return 4;
