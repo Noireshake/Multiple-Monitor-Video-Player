@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+APP="$SCRIPT_DIR/build/vlc_spanning"
 VIDEO="${1:-}"
 
 if [[ -n "$VIDEO" && ! "$VIDEO" =~ ^https?:// && ! -f "$VIDEO" ]]; then
@@ -8,10 +10,10 @@ if [[ -n "$VIDEO" && ! "$VIDEO" =~ ^https?:// && ! -f "$VIDEO" ]]; then
     exit 1
 fi
 
-if [[ ! -x "./build/vlc_spanning" ]]; then
+if [[ ! -x "$APP" ]]; then
     echo "Executable not found. Build first:"
-    echo "  cmake -S . -B build -DCMAKE_BUILD_TYPE=Release"
-    echo "  cmake --build build -j\"$(nproc)\""
+    echo "  cmake -S \"$SCRIPT_DIR\" -B \"$SCRIPT_DIR/build\" -DCMAKE_BUILD_TYPE=Release"
+    echo "  cmake --build \"$SCRIPT_DIR/build\" -j\"$(nproc)\""
     exit 1
 fi
 
@@ -21,9 +23,9 @@ echo "SDL_VIDEODRIVER=$SDL_VIDEODRIVER"
 
 if [[ -z "$VIDEO" ]]; then
     echo "Starting VLC Spanning Player"
-    exec ./build/vlc_spanning
+    exec "$APP"
 fi
 
 echo "Playing: $VIDEO"
 
-exec ./build/vlc_spanning "$VIDEO"
+exec "$APP" "$VIDEO"

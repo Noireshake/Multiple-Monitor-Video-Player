@@ -489,6 +489,10 @@ int main(int argc, char* argv[])
         return true;
     };
     auto load_media = [&](const std::string& path) {
+        if (path.rfind("https://", 0) == 0 && !is_youtube_location(path)) {
+            open_web(path);
+            return;
+        }
         if (!is_network_location(path)) {
             std::error_code file_error;
             if (!std::filesystem::is_regular_file(path, file_error)) {

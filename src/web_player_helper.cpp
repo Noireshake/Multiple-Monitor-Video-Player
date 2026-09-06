@@ -110,6 +110,8 @@ int main(int argc, char* argv[])
     WebKitSettings* settings = webkit_web_view_get_settings(state.web_view);
     webkit_settings_set_enable_javascript(settings, TRUE);
     webkit_settings_set_media_playback_requires_user_gesture(settings, FALSE);
+    webkit_settings_set_media_playback_allows_inline(settings, TRUE);
+    webkit_settings_set_enable_write_console_messages_to_stdout(settings, TRUE);
     webkit_settings_set_enable_fullscreen(settings, FALSE);
     g_signal_connect(state.web_view, "enter-fullscreen",
                      G_CALLBACK(keep_embedded_fullscreen), nullptr);
