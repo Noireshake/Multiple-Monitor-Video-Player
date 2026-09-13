@@ -1,274 +1,83 @@
-# VLC Spanning Player for Ubuntu
-<img width="2732" height="767" alt="image" src="https://github.com/user-attachments/assets/d8b51cf9-83f7-4d49-8b63-54c0db69664c" />
+# VLC Spanning Player for macOS
 
-This program creates ONE decorated, resizable X11 window covering the complete
-X11 virtual desktop and embeds LibVLC into that window. The result is one
-video surface spanning both monitors. Press `F` to switch that same window to
-explicit combined-desktop fullscreen.
+VLC Spanning Player creates one Cocoa window and one LibVLC video surface across two selected displays. It supports local media, HTTP(S) URLs, YouTube playback through yt-dlp, display selection, FIT/CROP/STRETCH modes, quality limits, playback controls, seeking, fullscreen, audio tracks, subtitles, and a transparent floating control bar.
 
-At startup the video window is hidden. With no command-line input, the app
-opens the file/URL picker and creates the spanning video window only after
-media is selected. The controls are a separate small X11 overlay placed over
-the video window; there is only one video player and one video surface.
+The macOS implementation is under `OSX/`. The application uses one LibVLC instance, one media player, and one native window. It does not create separate players or video windows per monitor.
 
-## Important limitation
+## Requirements
 
-`libvlc_media_player_set_xwindow()` is specifically an X11 embedding API.
-Ubuntu GNOME normally uses Wayland on modern installations.
+- macOS 10.11 or newer
+- CMake 3.20 or newer
+- Xcode Command Line Tools
+- VLC installed at `/Applications/VLC.app`
+- yt-dlp available as `yt-dlp`, `/usr/local/bin/yt-dlp`, or `/opt/homebrew/bin/yt-dlp`
 
-The program therefore attempts to use SDL2's X11 backend. If the session has
-Xwayland available, run:
+The build currently targets x86_64. Apple Silicon can run it through Rosetta unless an arm64 or universal LibVLC build is supplied.
 
-    SDL_VIDEODRIVER=x11 ./build/vlc_spanning /path/to/video.mp4
+## Build and Run
 
-If Xwayland is not available, use an Xorg session.
+From the repository root:
+
+```bash
+./run.sh --help
+./run.sh /path/to/video.mp4
+./run.sh 'https://www.youtube.com/watch?v=VIDEO_ID'
+```
+
+The launcher configures and incrementally builds the single canonical `build-macos` directory before launching. To run the existing binary without rebuilding:
+
+```bash
+VLC_SPANNING_NO_BUILD=1 ./run.sh /path/to/video.mp4
+```
+
+Direct build:
+
+```bash
+cmake -S OSX -B build-macos -DCMAKE_BUILD_TYPE=Release
+cmake --build build-macos --config Release --parallel 2
+```
+
+Supported options include `--fit`, `--crop`, `--stretch`, `--ratio W:H`, and `--quality auto|2160|1440|1080|720|480|360|240`.
+
+## Package the App
+
+The packaging script bundles LibVLC, its plugins and data, the application icon, and the signed app bundle into `dist-macos`:
+
+```bash
+OSX/package-macos.sh
+```
+
+Create an installable compressed DMG:
+
+```bash
+MAKE_DMG=1 OSX/package-macos.sh
+```
+
+The output is `VLC-Spanning-macOS.dmg`. The default signing identity is ad hoc. Set `SIGNING_IDENTITY` to a Developer ID Application certificate for distribution and notarization.
+
+## YouTube Playback
+
+YouTube URLs are resolved by yt-dlp before being passed to LibVLC. The resolver prefers H.264/MP4 video with M4A audio, supports separate video and audio streams, and applies the selected maximum video height. Keep URLs containing `&` quoted.
+
+If extraction fails, update yt-dlp:
+
+```bash
+brew upgrade yt-dlp
+```
 
 ## Controls
 
-- F: toggle fullscreen across the combined desktop
-- ESC: leave fullscreen, or quit when windowed
-- SPACE: pause/resume
-- Q: quit
-- GNOME Alt+F7: move the normal window
-- GNOME Alt+F8: resize the normal window
-- Open > Search YouTube: search a bounded list of results, inspect the selected
-  thumbnail and metadata, and press Play to load it. Searching never starts
-  playback or creates a second LibVLC player.
-
-## Display modes
-
-The default mode is `--fit`, which preserves the source aspect ratio and lets
-LibVLC letterbox as needed. `--crop` adds VLC's crop-ratio option for the
-configured target ratio, while `--stretch` sets the LibVLC display aspect
-ratio to the target and may distort the source.
-
-The default target is the exact ratio `2732:768`, not `32:9`.
-
-For reliable X11 embedding, the player uses LibVLC's `xcb_x11` video output
-and software decoding. This avoids VA-API driver initialization failures on
-systems where the installed graphics driver does not expose a usable VA-API
-device.
-
-The Settings menu lets you select Display 1 and Display 2. It shows both
-native resolutions, the combined canvas resolution, and the calculated canvas
-aspect ratio live. Applying the selection moves and resizes the player to the
-union of the selected monitors.
-
-LibVLC supplies the codec support, so the player accepts the formats handled
-by the installed VLC build, including MP4, MKV, AVI, MOV, WebM, MPEG, TS,
-M4V, FLV, OGG, and common 3GP/ASF variants. The control bar is translucent,
-hover-driven, draggable, and its timeline supports click and drag seeking.
-
-## Install dependencies
-
-For Ubuntu 24.04:
-
-    sudo apt update
-    sudo apt install -y \
-        build-essential \
-        cmake \
-        pkg-config \
-        libsdl2-dev \
-        libvlc-dev \
-        libvlccore-dev \
-        yt-dlp \
-        libx11-dev \
-        libgtk-4-dev
-
-Ubuntu's package repository provides libvlc-dev. Do not try to use
-`find_package(VLC REQUIRED)` unless you have installed a separate CMake
-package that actually exports a VLC CMake config.
-
-## Build
-
-From this directory:
-
-    rm -rf build
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-    cmake --build build -j"$(nproc)"
-
-Check the executable:
-
-    ./build/vlc_spanning --help
-
-The program itself uses positional video input or an HTTP(S) URL, so --help is
-expected to print the usage line and exit.
-
-## Run
-
-Normal window, FIT mode:
-
-    SDL_VIDEODRIVER=x11 ./build/vlc_spanning "$HOME/Videos/test.mp4"
-
-YouTube URL, FIT mode:
-
-    SDL_VIDEODRIVER=x11 ./build/vlc_spanning 'https://www.youtube.com/watch?v=VIDEO_ID'
-
-YouTube playback uses `yt-dlp` to resolve a current direct stream URL before
-passing it to LibVLC. The same `--fit`, `--crop`, `--stretch`, and `--ratio`
-options apply to URLs as they do to local video files. Keep the URL quoted
-when it contains `&`.
-
-YouTube quality can be selected in Player Settings or at startup. `auto`
-selects the best available quality; a numeric value caps the video height:
-
-    SDL_VIDEODRIVER=x11 ./build/vlc_spanning --quality 720 'https://www.youtube.com/watch?v=VIDEO_ID'
-
-Quality selection applies to YouTube URLs. Local files use the quality encoded
-in the file and are not transcoded.
-
-If YouTube extraction fails, update the extractor with:
-
-    sudo apt install --only-upgrade yt-dlp
-
-With no argument, the installed launcher opens a welcome screen. The Open
-control and `Ctrl+O` show a dialog that can browse for a local video or accept
-an HTTP(S)/YouTube URL. The same dialog also provides Search YouTube. Search
-results are limited to 12 lightweight `yt-dlp` entries and thumbnails are
-loaded only for the selected result, so searching does not retain a large
-playlist or download video data. Press Play to pass the selected YouTube URL
-to the existing single LibVLC player.
-
-## Install the desktop application
-
-    sudo cmake --install build
-
-The latest package artifact is `vlc-spanning_1.6_amd64.deb` in the
-project root. The source is under `src/` and application resources are under
-`resources/`.
-
-This installs `vlc_spanning`, the `VLC Spanning Player` GNOME launcher, an
-original application icon, and a private LibVLC runtime with its plugins and
-data. The installed app does not require the VLC desktop package. The launcher
-accepts files opened from GNOME Files through its registered video MIME types.
-
-CROP mode:
-
-    SDL_VIDEODRIVER=x11 ./build/vlc_spanning --ratio 2732:768 --crop "$HOME/Videos/test.mp4"
-
-STRETCH mode:
-
-    SDL_VIDEODRIVER=x11 ./build/vlc_spanning --ratio 2732:768 --stretch "$HOME/Videos/test.mp4"
-
-For a filename containing spaces, keep the quotes.
-
-## Verify the desktop geometry first
-
-Use:
-
-    echo "$XDG_SESSION_TYPE"
-    echo "$DISPLAY"
-    echo "$WAYLAND_DISPLAY"
-    xrandr --query
-
-You want two displays visible in `xrandr`.
-
-If `XDG_SESSION_TYPE=wayland`, that is not automatically a problem: the
-program can run through Xwayland if the X11 backend is available.
-
-## Why the original code was unreliable
-
-1. The `SDL_Rect total_rect` started at {0,0,0,0}. This breaks layouts where
-   monitors have negative X/Y coordinates, which is common when a monitor is
-   positioned to the left or above the primary monitor.
-
-2. `find_package(VLC REQUIRED)` is not a dependable Ubuntu LibVLC discovery
-   method. The Ubuntu development package exposes LibVLC through pkg-config,
-   so this project uses `pkg_check_modules(... libvlc)`.
-
-3. `SDL_GetWindowID(window)` is an SDL window ID, not an explicitly retrieved
-   native X11 Window handle. For LibVLC's X11 API, we retrieve the actual X11
-   window through `SDL_GetWindowWMInfo()`.
-
-4. LibVLC documents that `XInitThreads()` must be called before `libvlc_new()`
-   and before Xlib is used. This project calls it before SDL initialization.
-
-5. Native Wayland cannot be passed to `libvlc_media_player_set_xwindow()`.
-   The code checks that SDL actually selected X11 and gives a clear error
-   otherwise.
-
-6. The original code did not attach the media to the player with
-   `libvlc_media_player_set_media()`. This version does that explicitly.
-
-7. The original display-bound calculation can produce incorrect width/height
-   for non-zero or negative monitor origins. This version calculates the
-   union using left/top/right/bottom coordinates.
-
-## Aspect ratio vs. forced stretching
-
-The default version preserves the video's aspect ratio. Therefore, if the
-video aspect ratio does not match the combined monitor aspect ratio, VLC may
-letterbox the video.
-
-For a video that was specifically rendered for the exact combined display
-resolution/aspect ratio, this is normally what you want.
-
-If you deliberately want the video stretched to every pixel of the combined
-window, you can change the LibVLC video-fit behavior, but that can visibly
-distort the image. The best source video is one whose aspect ratio matches
-the total spanning area.
-
-## Monitor arrangement
-
-Example:
-
-Monitor 1: 1920x1080 at (0,0)
-Monitor 2: 1920x1080 at (1920,0)
-
-The program creates approximately:
-
-    3840x1080 at (0,0)
-
-If the second monitor is left of the primary:
-
-Monitor 1: 1920x1080 at (1920,0)
-Monitor 2: 1920x1080 at (0,0)
-
-or another X11 arrangement, the union calculation handles the negative
-coordinates correctly.
-
-## If you get "SDL is not using X11"
-
-Run:
-
-    SDL_VIDEODRIVER=x11 ./build/vlc_spanning "$HOME/Videos/test.mp4"
-
-Then inspect:
-
-    echo "$DISPLAY"
-    xrandr --query
-
-If X11/Xwayland is unavailable, log into an Ubuntu "Ubuntu on Xorg"
-session and run the same executable.
-
-## Test LibVLC independently
-
-Before debugging the C++ program, verify VLC itself can play the file:
-
-    vlc "$HOME/Videos/test.mp4"
-
-Then verify LibVLC is visible to pkg-config:
-
-    pkg-config --modversion libvlc
-    pkg-config --cflags --libs libvlc
-
-Verify SDL2:
-
-    pkg-config --modversion sdl2
-
-## Expected architecture
-
-    Monitor A ─┐
-               │
-               ├── X11 virtual desktop
-               │
-    Monitor B ─┘
-                     ↓
-              one SDL/X11 window
-                     ↓
-                 LibVLC
-                     ↓
-              one video surface
-
-The program is NOT playing two independent VLC instances. It is one media
-player and one window whose geometry spans the two displays.
+- `F`: toggle fullscreen across the selected displays
+- `Esc`: leave fullscreen, or quit when windowed
+- `Space`: pause or resume
+- `Q`: quit
+- `M`: mute
+- Arrow keys: seek and change volume
+- `Cmd+O`: open a local file or URL
+- Right-click: choose audio and subtitle tracks
+
+## Validation
+
+The command-line build, app packaging, icon embedding, code-signature verification, and DMG generation have been validated. A physical two-display playback test is still required to verify the complete rendered frame, mouse interaction, fullscreen behavior, and monitor arrangement on the target Mac.
+
+See [MACOS_HANDOFF.md](MACOS_HANDOFF.md) for implementation details and handoff notes.

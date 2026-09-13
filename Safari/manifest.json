@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "VLC Spanning Player",
+  "description": "Send the current YouTube video to VLC Spanning Player.",
+  "version": "1.0.0",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Send to VLC Spanning Player"
+  }
+}

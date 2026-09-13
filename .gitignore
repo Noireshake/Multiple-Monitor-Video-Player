@@ -1,9 +1,13 @@
-build/
+build-macos/
 *.o
 *.obj
 *.swp
 *~
 core
 core.*
-_CPack_Packages/
 *.deb
+.DS_Store
+dist-macos/
+VLC-Spanning-macOS.dmg
+crash.log
+movie.mp4
