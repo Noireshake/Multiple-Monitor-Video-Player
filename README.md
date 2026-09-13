@@ -1,4 +1,6 @@
-# VLC Spanning Player for macOS
+#Multiple-Monitor-Video-Player
+
+for macOS & Ubuntu
 
 VLC Spanning Player creates one Cocoa window and one LibVLC video surface across two selected displays. It supports local media, HTTP(S) URLs, YouTube playback through yt-dlp, display selection, FIT/CROP/STRETCH modes, quality limits, playback controls, seeking, fullscreen, audio tracks, subtitles, and a transparent floating control bar.
 
